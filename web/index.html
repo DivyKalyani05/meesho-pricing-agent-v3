@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kurti Pricing Agent</title>
+<link rel="icon" href="/static/logo.webp">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <img class="logo" src="/static/logo.webp" alt="" width="32" height="32">
+      <div class="brand-text">
+        <span class="brand-title">Pricing Agent</span>
+        <span class="brand-sub">for Meesho sellers</span>
+      </div>
+      <span class="proto">Prototype</span>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button class="tab active" data-tab="price" role="tab" aria-selected="true">Price a product</button>
+      <button class="tab" data-tab="listings" role="tab" aria-selected="false">My listings</button>
+      <button class="tab" data-tab="db" role="tab" aria-selected="false">Data</button>
+    </nav>
+  </div>
+</header>
+
+<main>
+<!-- ============================================================ PRICE TAB -->
+<section id="tab-price" class="tab-panel">
+  <div class="page-head">
+    <div>
+      <h1>Price a new kurti</h1>
+      <p class="lede">Describe the product and your costs. The agent compares it with live listings and recommends a launch price.</p>
+    </div>
+    <div class="examples">
+      <span class="examples-label">Examples</span>
+      <button type="button" class="chip" data-example="0">Jaipur cotton kurti</button>
+      <button type="button" class="chip" data-example="1">Festive silk set</button>
+      <button type="button" class="chip" data-example="2">Clearance before sell-by</button>
+    </div>
+  </div>
+
+  <div class="layout">
+    <form id="form" class="panel form" novalidate>
+      <fieldset>
+        <legend>Seller</legend>
+        <label>Seller account
+          <select name="seller_id" id="seller"></select>
+        </label>
+        <p class="hint" id="seller-hint"></p>
+      </fieldset>
+
+      <fieldset>
+        <legend>Product</legend>
+        <label class="photo-drop" id="photo-drop">
+          <input type="file" id="photos" accept="image/*" multiple>
+          <span class="photo-cta">Add product photos</span>
+          <span class="hint">More photos get more clicks. Photos stay on your device.</span>
+        </label>
+        <div id="thumbs" class="thumbs"></div>
+        <label>Title
+          <input name="title" maxlength="200" placeholder="Jaipuri Cotton Hand Block Print Kurti">
+        </label>
+        <label>Description
+          <textarea name="description" rows="3" maxlength="2000" placeholder="Fabric, work, sleeve, length, occasion"></textarea>
+        </label>
+        <div class="detect-row">
+          <button type="button" id="detect" class="btn-link">Fill details from description</button>
+        </div>
+        <div class="grid2">
+          <label>Type <select name="product_type"></select></label>
+          <label>Fabric <select name="fabric"></select></label>
+          <label>Work / pattern <select name="pattern"></select></label>
+          <label>Occasion <select name="occasion"></select></label>
+          <label>Sleeve <select name="sleeve"></select></label>
+          <label>Length <select name="length"></select></label>
+        </div>
+        <label>Colours <span class="opt">Optional · one listing per colour</span>
+          <input name="colors" maxlength="200" placeholder="Indigo, Maroon">
+        </label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Costs</legend>
+        <div class="grid2">
+          <label>Cost per piece
+            <span class="input-prefix"><span>₹</span><input name="cogs" type="number" min="1" step="1" inputmode="numeric" placeholder="150"></span>
+          </label>
+          <label>Package
+            <select name="package_size">
+              <option value="auto">Auto</option>
+              <option value="S">Small poly-bag</option>
+              <option value="M">Medium poly-bag</option>
+              <option value="L">Large / box</option>
+            </select>
+          </label>
+          <label>Shop price <span class="opt">Optional</span>
+            <span class="input-prefix"><span>₹</span><input name="offline_price" type="number" min="1" step="1" inputmode="numeric"></span>
+          </label>
+          <label>Shop margin <span class="opt">Optional</span>
+            <span class="input-suffix"><input name="offline_margin_pct" type="number" min="0" max="95" step="1" inputmode="numeric"><span>%</span></span>
+          </label>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Stock &amp; timing</legend>
+        <div class="grid2">
+          <label>Units in stock
+            <input name="inventory" type="number" min="1" step="1" inputmode="numeric" placeholder="200">
+          </label>
+          <label>Plan for
+            <span class="input-suffix"><input name="horizon_days" type="number" min="7" max="180" step="1" value="30"><span>days</span></span>
+          </label>
+          <label>Launch date
+            <input name="launch_date" type="date">
+          </label>
+          <label>Sell-by date <span class="opt">Optional</span>
+            <input name="expiry_date" type="date">
+          </label>
+        </div>
+        <label class="check"><input type="checkbox" name="limited_stock"> One-time lot, can't restock this design</label>
+      </fieldset>
+
+      <fieldset>
+        <legend>Goal</legend>
+        <div id="modes" class="modes" role="radiogroup"></div>
+      </fieldset>
+
+      <div id="form-error" class="error" role="alert" hidden></div>
+      <button type="submit" class="btn-primary btn-block" id="submit">Get my price</button>
+    </form>
+
+    <div id="results" class="results">
+      <div class="panel empty" id="empty">
+        <p class="eyebrow">How it works</p>
+        <h2>A launch price you can explain</h2>
+        <ol class="steps">
+          <li><b>Reads your product</b><span>Fabric, work, occasion and package size from your description and photos.</span></li>
+          <li><b>Checks the market</b><span>Prices, sales, ratings and returns of similar live kurtis, plus festivals and season.</span></li>
+          <li><b>Does the maths</b><span>Your cost, shipping, GST and returns at every price, for the goal you pick.</span></li>
+        </ol>
+        <p class="muted small">Choose an example above to see a full recommendation.</p>
+      </div>
+      <div id="output" hidden></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================================================ LISTINGS TAB -->
+<section id="tab-listings" class="tab-panel" hidden>
+  <div class="page-head">
+    <div>
+      <h1>My listings</h1>
+      <p class="lede">Every live kurti, how it is selling, and the price it should have now. Colours of one design are priced together.</p>
+    </div>
+    <div class="l-controls">
+      <label>Seller <select id="l-seller"></select></label>
+      <div>
+        <div class="l-label">Goal</div>
+        <div class="seg" id="l-mode" role="radiogroup"></div>
+      </div>
+    </div>
+  </div>
+  <div id="l-summary"></div>
+  <div id="l-rivals"></div>
+  <div class="filters" id="l-filters"></div>
+  <div id="l-groups"></div>
+</section>
+
+<!-- ============================================================ DB TAB -->
+<section id="tab-db" class="tab-panel" hidden>
+  <div class="page-head">
+    <div>
+      <h1>Marketplace data</h1>
+      <p class="lede">How the data behind the agent is organised. It is a synthetic snapshot of the Kurtis &amp; Kurta Sets
+        category, generated from a hidden demand model so we can check that the agent rediscovers buyer behaviour from data alone.</p>
+    </div>
+  </div>
+  <div id="er" class="er"></div>
+  <div id="tables"></div>
+</section>
+</main>
+
+<div id="tooltip" class="tooltip" hidden></div>
+<script src="/static/app.js"></script>
+</body>
+</html>

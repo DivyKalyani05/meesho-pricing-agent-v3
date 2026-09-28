@@ -1,0 +1,12 @@
+# Render blueprint: https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: kurti-pricing-agent
+    runtime: python
+    plan: free
+    buildCommand: python3 -m pricing_agent.seed   # builds the demo database (about 2 seconds)
+    startCommand: python3 run.py
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
