@@ -411,6 +411,7 @@ class PricingAgent:
                 "gmv": round(best["gmv"]),
                 "days_to_sell_out": _days(best["days_to_sell_out"]),
                 "horizon_days": horizon, "has_expiry": has_expiry, "writeoff": round(best["writeoff"]),
+                "sell_by": expiry.isoformat() if has_expiry else None,
                 "stock_limited": is_capped(inp["mode"]), "inventory": inv,
                 "writeoff_if_unsold": round(inv * inp["cogs"] * (1 - config.SALVAGE_SHARE_OF_COGS)) if has_expiry else None,
                 "percentile_in_market": pct_rank, "note": note,

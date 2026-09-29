@@ -63,6 +63,8 @@ async function init() {
   fe("launch_date").value = m.default_launch_date;
   fe("launch_date").min = m.snapshot_date;
   sellerSel.addEventListener("change", sellerHint);
+  ["expiry_date", "launch_date"].forEach(n => fe(n).addEventListener("input", horizonHint));
+  horizonHint();
   sellerHint();
 
   $("#photos").addEventListener("change", e => addPhotos(e.target.files));
@@ -75,6 +77,21 @@ async function init() {
   form.addEventListener("submit", e => { e.preventDefault(); submit(); });
   $$(".tab").forEach(b => b.addEventListener("click", () => switchTab(b.dataset.tab)));
   $("#db-select").addEventListener("change", e => openTable(e.target.value));
+}
+
+// a sell-by date sets the planning window; say so next to "Plan for"
+function horizonHint() {
+  const exp = fe("expiry_date").value, launch = fe("launch_date").value || state.meta.default_launch_date;
+  const box = $("#horizon-hint"), input = fe("horizon_days");
+  const days = exp ? Math.round((Date.parse(exp) - Date.parse(launch)) / 86400000) : null;
+  if (days && days > 0) {
+    input.disabled = true;
+    box.textContent = `Your sell-by date sets this: ${days} days, until ${shortDate(exp)}.`;
+    box.hidden = false;
+  } else {
+    input.disabled = false;
+    box.hidden = true;
+  }
 }
 
 function showFormError(e) {
@@ -169,6 +186,7 @@ async function loadExample(i) {
   $$("#modes input").forEach(r => { r.checked = r.value === ex.mode; });
   $$("#modes .mode").forEach(l => l.classList.toggle("selected", l.querySelector("input").checked));
   sellerHint();
+  horizonHint();
   samplePhotos(ex.photos, ex.hue);
   await detect(true);
   submit();
@@ -246,7 +264,7 @@ function render() {
     [rec.orders_per_day >= 1 ? num(rec.orders_per_day, 1) : num(rec.orders_per_day, 2), T("orders a day", "ऑर्डर / दिन")],
     [inr(rec.profit_per_order), T("profit per order", "मुनाफ़ा / ऑर्डर")],
     [`${num(rec.margin_pct, 1)}%`, T("margin", "मार्जिन")],
-    [inr(rec.total_profit), T(`profit in ${rec.horizon_days} days`, `${rec.horizon_days} दिन का मुनाफ़ा`)],
+    [inr(rec.total_profit), windowText(rec, L).stat],
     [rec.days_to_sell_out === null ? "–" : `${num(rec.days_to_sell_out, 0)} ${T("days", "दिन")}`,
       T(`to sell ${rec.inventory} pieces`, `${rec.inventory} पीस बिकने में`)],
   ];
@@ -275,7 +293,7 @@ function render() {
         <p class="summary">${esc(tr(ex.summary))}</p>
         <div class="plan-line">
           <div class="plan-pt on"><div class="k">${T("Launch", "लॉन्च")}</div><div class="v">${inr(rec.entry_price)}</div></div>
-          <div class="plan-pt${steady ? "" : " off-pt"}"><div class="k">${T("After 20–25 reviews", "20–25 रिव्यू के बाद")}</div><div class="v">${inr(steady ? rec.steady_price : rec.entry_price)}</div></div>
+          <div class="plan-pt${steady ? "" : " off-pt"}"><div class="k">${T("After 20–25 reviews", "20–25 रिव्यू के बाद")}</div><div class="v">${steady ? inr(rec.steady_price) : T("Hold", "यही रखें")}</div></div>
           <div class="plan-pt floor"><div class="k">${T("Never go below", "इससे कम नहीं")}</div><div class="v">${inr(rec.break_even_price)}</div></div>
         </div>
         <div class="list-row">
@@ -317,7 +335,7 @@ function render() {
     </div>
     <div class="panel chart">
       <div class="panel-head"><div><h2>${T("Profit at every price", "हर कीमत पर मुनाफ़ा")}</h2>
-        <div class="panel-sub">${T(`Next ${rec.horizon_days} days${rec.stock_limited ? `, ${rec.inventory} pieces` : ""}. Hover the line.`, `अगले ${rec.horizon_days} दिन`)}</div></div></div>
+        <div class="panel-sub">${windowText(rec, L).chart}${rec.stock_limited ? T(`, ${rec.inventory} pieces`, `, ${rec.inventory} पीस`) : ""}. ${T("Hover the line.", "")}</div></div></div>
       <div id="chart-curve"></div>
       <div class="legend">
         <span><i style="background:var(--series-1)"></i>${T("Total profit", "कुल मुनाफ़ा")}</span>
@@ -329,7 +347,7 @@ function render() {
   <div class="row2">
     <div class="panel">
       <div class="panel-head"><div><h2>${T("Compare goals", "लक्ष्यों की तुलना")}</h2>
-        <div class="panel-sub">${T(`Profit is for the next ${rec.horizon_days} days`, `मुनाफ़ा अगले ${rec.horizon_days} दिनों का है`)}</div></div></div>
+        <div class="panel-sub">${windowText(rec, L).table}</div></div></div>
       <div class="table-wrap"><table>
         <thead><tr><th>${T("Goal", "लक्ष्य")}</th><th class="num">${T("Price", "कीमत")}</th><th class="num">${T("Orders/day", "ऑर्डर/दिन")}</th><th class="num">${T("Per order", "प्रति ऑर्डर")}</th><th class="num">${T("Profit", "मुनाफ़ा")}</th></tr></thead>
         <tbody>${Object.entries(r.modes).map(([k, m]) => `
@@ -404,6 +422,25 @@ async function narratePricing(result) {
   }
   state.ai[id] = out.source === "ai" ? "ai" : "template";
   if (state.result === result) render();
+}
+
+function shortDate(iso) {
+  const [y, m, d] = String(iso).split("-").map(Number);
+  return `${d} ${["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][m - 1]}`;
+}
+
+// how the planning window is named everywhere: a sell-by date replaces "plan for N days"
+function windowText(rec, L) {
+  const n = rec.horizon_days;
+  if (rec.sell_by) {
+    const d = shortDate(rec.sell_by);
+    return { stat: L ? `${d} तक मुनाफ़ा` : `profit by ${d}`,
+             chart: L ? `sell-by date (${d}, ${n} दिन) तक` : `Until your sell-by date, ${d} (${n} days)`,
+             table: L ? `मुनाफ़ा sell-by date (${d}, ${n} दिन) तक का है` : `Profit until your sell-by date, ${d} (${n} days)`,
+             tip: `Profit by ${d}` };
+  }
+  return { stat: L ? `${n} दिन का मुनाफ़ा` : `profit in ${n} days`, chart: L ? `अगले ${n} दिन` : `Next ${n} days`,
+           table: L ? `मुनाफ़ा अगले ${n} दिनों का है` : `Profit is for the next ${n} days`, tip: `Profit in ${n} days` };
 }
 
 function noteRow([kind, label, text]) {
@@ -574,7 +611,7 @@ function drawCurve(el, r) {
     xh.setAttribute("x1", x(best.price)); xh.setAttribute("x2", x(best.price)); xh.setAttribute("visibility", "visible");
     xd.setAttribute("cx", x(best.price)); xd.setAttribute("cy", y(best.total_profit)); xd.setAttribute("visibility", "visible");
     const goals = modeAt[best.price] ? `<div style="color:var(--accent);font-weight:600">${esc(modeAt[best.price].join(" / "))}</div>` : "";
-    showTip(e, `<b>At ${inr(best.price)}</b>${goals}Orders/day: ${num(best.orders_per_day, 2)}<br>Profit/order: ${inr(best.profit_per_order, 1)}<br>Profit in ${rec.horizon_days} days: ${inr(best.total_profit)}`);
+    showTip(e, `<b>At ${inr(best.price)}</b>${goals}Orders/day: ${num(best.orders_per_day, 2)}<br>Profit/order: ${inr(best.profit_per_order, 1)}<br>${windowText(rec, false).tip}: ${inr(best.total_profit)}`);
   });
   hov.addEventListener("mouseleave", () => { hideTip(); xh.setAttribute("visibility", "hidden"); xd.setAttribute("visibility", "hidden"); });
 }

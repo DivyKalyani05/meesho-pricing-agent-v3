@@ -108,6 +108,8 @@ input.invalid { border-color: var(--bad); box-shadow: 0 0 0 3px var(--bad-soft);
 .detected select { border-color: var(--accent); }
 .detected::after { content: "auto-filled"; display: block; font-size: .7rem; color: var(--accent); margin-top: 3px; font-weight: 500; }
 .detect-row { margin: -4px 0 14px; }
+.field-note { display: block; font-size: .72rem; color: var(--accent); margin-top: 4px; font-weight: 500; line-height: 1.35; }
+input:disabled { background: var(--surface-2); color: var(--muted); }
 .btn-link { border: 0; background: none; padding: 0; color: var(--accent); font-weight: 600; font-size: .84rem; cursor: pointer; }
 .btn-link:hover { text-decoration: underline; }
 

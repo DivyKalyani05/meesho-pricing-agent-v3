@@ -248,9 +248,13 @@ def build_explanation(res, cf, best, inp, eco, sc):
             txt_hi = (f"₹{price} पर भी {rec['horizon_days']} दिनों में आपके {inv} में से लगभग {rec['units_sold_in_horizon']} पीस बिकेंगे। "
                       f"समय बढ़ाएँ, कॉम्बो ऑफ़र या Meesho ads आज़माएँ।")
         else:
-            txt_en = (f"Your goal is to clear {inv} pieces within {rec['horizon_days']} days. ₹{price} is the highest price at "
+            by_en = (f"before your sell-by date ({inp['expiry_date'].strftime('%d %b')}, {rec['horizon_days']} days away)"
+                     if rec["has_expiry"] else f"within {rec['horizon_days']} days")
+            by_hi = (f"sell-by date ({inp['expiry_date'].strftime('%d %b')}, {rec['horizon_days']} दिन बाद) से पहले"
+                     if rec["has_expiry"] else f"{rec['horizon_days']} दिन में")
+            txt_en = (f"Your goal is to clear {inv} pieces {by_en}. ₹{price} is the highest price at "
                       f"which we expect everything to sell in time (about {dts} days).")
-            txt_hi = (f"आपका लक्ष्य {rec['horizon_days']} दिन में {inv} पीस बेचना है। ₹{price} वह सबसे ऊँची कीमत है जिस पर "
+            txt_hi = (f"आपका लक्ष्य {by_hi} {inv} पीस बेचना है। ₹{price} वह सबसे ऊँची कीमत है जिस पर "
                       f"सारा स्टॉक समय पर (लगभग {dts} दिन में) बिक जाएगा।")
         reasons.append({"icon": "stock", "tone": "neutral", "effect": f"{inv} pcs",
                         "title": _t("Clearing your stock", "स्टॉक खाली करना"), "text": _t(txt_en, txt_hi)})
@@ -343,12 +347,18 @@ def build_explanation(res, cf, best, inp, eco, sc):
     if rec.get("writeoff_if_unsold") and tp < 0:
         prof_en += f" (vs {inr(rec['writeoff_if_unsold'])} lost if the stock is not sold at all)"
         prof_hi += f" (स्टॉक न बिकने पर {inr(rec['writeoff_if_unsold'])} का नुकसान होता)"
+    if rec["has_expiry"]:
+        d = inp["expiry_date"].strftime("%d %b")
+        window_en = f"by your sell-by date ({d}, {horizon} days away)"
+        window_hi = f"आपकी sell-by date ({d}, {horizon} दिन बाद) तक "
+    else:
+        window_en, window_hi = f"in the next {horizon} days", f"अगले {horizon} दिनों में "
     summary = _t(
         f"Launch at ₹{price}{' (show MRP ₹' + str(rec['suggested_mrp']) + ')' if rec['suggested_mrp'] > price else ''}. "
         f"Expect {orders_phrase(opd)['en']} and {inr(abs(ppo))} {'profit' if ppo >= 0 else 'loss'} per order - {prof_en} "
-        f"in the next {horizon} days{sell_en}.{steady_en}",
+        f"{window_en}{sell_en}.{steady_en}",
         f"₹{price} पर लॉन्च करें{' (MRP ₹' + str(rec['suggested_mrp']) + ' दिखाएँ)' if rec['suggested_mrp'] > price else ''}। "
-        f"{orders_phrase(opd)['hi']} और हर ऑर्डर पर {inr(abs(ppo))} {'मुनाफ़े' if ppo >= 0 else 'नुकसान'} की उम्मीद है - अगले {horizon} दिनों में "
+        f"{orders_phrase(opd)['hi']} और हर ऑर्डर पर {inr(abs(ppo))} {'मुनाफ़े' if ppo >= 0 else 'नुकसान'} की उम्मीद है - {window_hi}"
         f"{prof_hi}{sell_hi}।{steady_hi}")
     headline = _t(f"₹{price} is the right entry price for your kurti", f"आपकी कुर्ती के लिए सही शुरुआती कीमत ₹{price} है")
     return {"headline": headline, "summary": summary, "reasons": reasons, "tips": tips, "warnings": warnings}

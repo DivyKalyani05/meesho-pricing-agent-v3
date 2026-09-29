@@ -104,6 +104,7 @@ class Narrator:
             "price_after_reviews": rec["steady_price"], "orders_per_day": rec["orders_per_day"],
             "profit_per_order": rec["profit_per_order"], "margin_pct": rec["margin_pct"],
             "profit_in_horizon": rec["total_profit"], "horizon_days": rec["horizon_days"],
+            "sell_by_date": rec.get("sell_by"),
             "days_to_sell_stock": rec["days_to_sell_out"], "units_in_stock": rec["inventory"],
             "market_middle_range": [mkt["price_p25"], mkt["price_p75"]],
             "best_sellers_price": mkt["sales_weighted_median"], "comparable_listings": mkt["n_comparable"],
