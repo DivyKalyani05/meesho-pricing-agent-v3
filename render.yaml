@@ -1,7 +1,7 @@
 # Render blueprint: https://render.com/docs/blueprint-spec
 services:
   - type: web
-    name: kurti-pricing-agent
+    name: kurti-pricing-agent-v2
     runtime: python
     plan: free
     buildCommand: python3 -m pricing_agent.seed   # builds the demo database (about 2 seconds)
