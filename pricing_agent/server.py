@@ -97,6 +97,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if path == "/" or path == "/index.html":
                 return self._static("index.html")
+            if path in ("/prototype", "/prototype/"):
+                return self._static("prototype.html")
             if path.startswith("/static/"):
                 return self._static(path[len("/static/"):])
             return self._json(404, {"error": "Not found"})
