@@ -17,10 +17,26 @@ from pricing_agent import seed  # noqa: E402
 from pricing_agent.server import serve  # noqa: E402
 
 
+def load_dotenv(path):
+    """Read KEY=value lines from a local .env file (never committed) into the environment."""
+    if not os.path.isfile(path):
+        return
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key, value = key.strip().removeprefix("export ").strip(), value.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = value
+
+
 def main():
+    load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    # On a cloud host (e.g. Render) the platform sets $PORT and the app must listen on all interfaces.
-    cloud = "PORT" in os.environ
+    # On Render (which sets $RENDER and $PORT) the app must listen on all interfaces, on exactly that port.
+    cloud = bool(os.environ.get("RENDER"))
     ap.add_argument("--port", type=int, default=int(os.environ.get("PORT", 8000)))
     ap.add_argument("--host", default="0.0.0.0" if cloud else "127.0.0.1")
     ap.add_argument("--rebuild", action="store_true", help="regenerate the database")
@@ -35,7 +51,10 @@ def main():
 
     httpd, port = serve(seed.DB_PATH, args.host, args.port, exact_port=cloud)
     url = f"http://{args.host}:{port}/"
-    print(f"\n  Kurti Pricing Agent is running at {url}\n  Press Ctrl+C to stop.\n")
+    from pricing_agent.server import Handler
+    llm = Handler.narrator.info()
+    ai = f"AI explanations: {llm['provider']} ({llm['model']})" if llm["enabled"] else "AI explanations: off (no API key) - using templates"
+    print(f"\n  Kurti Pricing Agent is running at {url}\n  {ai}\n  Press Ctrl+C to stop.\n")
     if not args.no_browser and not cloud:
         try:
             webbrowser.open(url)

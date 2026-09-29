@@ -166,6 +166,7 @@
   </div>
   <div id="l-summary"></div>
   <div id="l-rivals"></div>
+  <div id="l-toast"></div>
   <div class="filters" id="l-filters"></div>
   <div id="l-groups"></div>
 </section>
@@ -179,8 +180,13 @@
         category, generated from a hidden demand model so we can check that the agent rediscovers buyer behaviour from data alone.</p>
     </div>
   </div>
-  <div id="er" class="er"></div>
-  <div id="tables"></div>
+  <div class="db-layout">
+    <aside class="panel db-side">
+      <label class="db-select-label">Table <select id="db-select"></select></label>
+      <nav id="db-nav" aria-label="Tables"></nav>
+    </aside>
+    <div id="db-main"></div>
+  </div>
 </section>
 </main>
 

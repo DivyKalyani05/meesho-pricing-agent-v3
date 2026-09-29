@@ -20,6 +20,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from pricing_agent import config, features, seed  # noqa: E402
 from pricing_agent.engine import Economics, InputError, PricingAgent  # noqa: E402
 from pricing_agent.explain import inr  # noqa: E402
+from pricing_agent.llm import LLMClient, LLMError  # noqa: E402
+from pricing_agent.narrator import Narrator, check_numbers  # noqa: E402
 from pricing_agent.repricer import Repricer  # noqa: E402
 from pricing_agent.server import serve  # noqa: E402
 
@@ -278,6 +280,76 @@ class TestListings(unittest.TestCase):
             self.rp.seller_listings(1, "nope")
 
 
+class FakeLLM(LLMClient):
+    """Stands in for Gemini/Groq: returns whatever the test hands it."""
+
+    def __init__(self, reply):
+        super().__init__({"GEMINI_API_KEY": "test"})
+        self.reply = reply
+        self.calls = 0
+
+    def complete_json(self, system, user, timeout=25.0):
+        self.calls += 1
+        if isinstance(self.reply, Exception):
+            raise self.reply
+        return self.reply(user) if callable(self.reply) else self.reply
+
+
+class TestNarrator(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.result = AGENT.recommend(dict(EXAMPLES[0]), save=False)
+
+    def good_reply(self, _prompt):
+        ex = self.result["explanation"]
+        price = self.result["recommendation"]["entry_price"]
+        pair = lambda t: {"en": t, "hi": t}
+        return {"headline": pair(f"Launch at ₹{price}"), "summary": pair(f"Start at ₹{price} and watch the first orders."),
+                "reasons": [pair("A clearer point.") for _ in ex["reasons"]], "tips": [pair("A tip.") for _ in ex["tips"]]}
+
+    def test_no_key_means_templates(self):
+        n = Narrator(LLMClient({}))
+        self.assertFalse(n.info()["enabled"])
+        self.assertEqual(n.narrate_pricing(self.result)["source"], "template")
+
+    def test_valid_ai_text_is_used(self):
+        fake = FakeLLM(self.good_reply)
+        out = Narrator(fake).narrate_pricing(self.result)
+        self.assertEqual(out["source"], "ai", out)
+        self.assertEqual(len(out["reasons"]), len(self.result["explanation"]["reasons"]))
+
+    def test_invented_numbers_are_rejected(self):
+        def lying(prompt):
+            r = self.good_reply(prompt)
+            r["summary"] = {"en": "Sell at ₹123457 for 97% more orders.", "hi": "x"}
+            return r
+        self.assertEqual(Narrator(FakeLLM(lying)).narrate_pricing(self.result)["source"], "template")
+        self.assertIsNotNone(check_numbers(["costs ₹999999"], {"price": 349}))
+        self.assertIsNone(check_numbers(["about ₹349 and 2.8 orders a day"], {"price": 349, "opd": 2.84}))
+
+    def test_bad_shape_and_errors_fall_back(self):
+        for reply in ({"headline": "no"}, LLMError("quota"), {"headline": {"en": "a", "hi": "b"}, "summary": {"en": "a", "hi": "b"},
+                                                              "reasons": [], "tips": []}):
+            self.assertEqual(Narrator(FakeLLM(reply)).narrate_pricing(self.result)["source"], "template")
+
+    def test_ai_results_are_cached(self):
+        fake = FakeLLM(self.good_reply)
+        n = Narrator(fake)
+        n.narrate_pricing(self.result)
+        n.narrate_pricing(self.result)
+        self.assertEqual(fake.calls, 1)
+
+    def test_listing_narration(self):
+        rp = Repricer(AGENT)
+        v, design, seller, goal = rp.find_variant(next(p["product_id"] for p in AGENT.market.active
+                                                      if p["seller_id"] == 1 and "Dabu" in p["title"]))
+        ok = FakeLLM({"summary": f"Move to ₹{v['recommended_price']}.", "points": ["Point."] * len(v["reasons"])})
+        self.assertEqual(Narrator(ok).narrate_listing(v, design, seller, goal)["source"], "ai")
+        short = FakeLLM({"summary": "x", "points": ["only one"]})
+        if len(v["reasons"]) != 1:
+            self.assertEqual(Narrator(short).narrate_listing(v, design, seller, goal)["source"], "template")
+
+
 class TestServer(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -354,6 +426,50 @@ class TestServer(unittest.TestCase):
         self.assertEqual(self.req("/api/listings?seller_id=abc")[0], 400)
         self.assertEqual(self.req("/api/list", dict(body, seller_id=None, price=300))[0], 400)
         self.assertEqual(self.req("/api/listings/apply", {"product_id": 1, "price": 300})[0], 400)
+
+    def test_data_browser(self):
+        s, b = self.req("/api/db/schema")
+        tables = {t["table"]: t for t in json.loads(b)["tables"]}
+        self.assertIn("sellers", tables["products"]["columns"][2]["fk"]["table"])
+        s, b = self.req("/api/db/table?name=products&page=2&size=10&sort=current_price&dir=desc")
+        d = json.loads(b)
+        self.assertEqual((s, d["page"], len(d["rows"])), (200, 2, 10))
+        prices = [r[[c["name"] for c in d["columns"]].index("current_price")] for r in d["rows"]]
+        self.assertEqual(prices, sorted(prices, reverse=True))
+        s, b = self.req("/api/db/table?name=products&q=Chikankari&size=100")
+        self.assertTrue(all("chikankari" in json.dumps(r).lower() for r in json.loads(b)["rows"]))
+        s, b = self.req("/api/db/table?name=sellers&filter_col=seller_id&filter_val=1")
+        self.assertEqual(json.loads(b)["total"], 1)
+        s, b = self.req("/api/db/export.csv?name=sellers&filter_col=seller_id&filter_val=1")
+        self.assertEqual((s, b.decode().count("\n")), (200, 2))
+        for bad in ("/api/db/table?name=sqlite_master", "/api/db/table?name=products;drop",
+                    "/api/db/table?name=products&sort=1;drop", "/api/db/table?name=products&filter_col=x"):
+            self.assertEqual(self.req(bad)[0], 400, bad)
+
+    def test_delist_relist_and_restore(self):
+        s, b = self.req("/api/listings?seller_id=4")
+        v = json.loads(b)["groups"][0]["variants"][0]
+        before = json.loads(b)["summary"]["listings"]
+        self.assertEqual(self.req("/api/listings/delist", {"product_id": v["product_id"]})[0], 200)
+        d = json.loads(self.req("/api/listings?seller_id=4")[1])
+        self.assertEqual(d["summary"]["listings"], before - 1)
+        self.assertNotIn(v["product_id"], [x["product_id"] for g in d["groups"] for x in g["variants"]])
+        from pricing_agent.server import Handler
+        self.assertNotIn(v["product_id"], [p["product_id"] for p in Handler.agent.market.active])
+        self.assertEqual(self.req("/api/listings/relist", {"product_id": v["product_id"]})[0], 200)
+        self.assertEqual(json.loads(self.req("/api/listings?seller_id=4")[1])["summary"]["listings"], before)
+        # example listings come back on page load
+        self.req("/api/listings/delist", {"product_id": v["product_id"]})
+        s, b = self.req("/api/demo/restore", {})
+        self.assertEqual(json.loads(b)["restored"], 1)
+        self.assertEqual(json.loads(self.req("/api/listings?seller_id=4")[1])["summary"]["listings"], before)
+        self.assertEqual(self.req("/api/listings/delist", {"product_id": 999999})[0], 400)
+
+    def test_narrate_endpoints_without_key(self):
+        s, b = self.req("/api/narrate/pricing", {"recommendation_id": 123456})
+        self.assertEqual(json.loads(b)["source"], "template")
+        s, b = self.req("/api/narrate/listing", {"product_id": 1000})
+        self.assertIn(json.loads(b)["source"], ("template", "ai"))
 
     def test_head_and_odd_requests(self):
         r = urllib.request.Request(f"http://127.0.0.1:{self.port}/api/health", method="HEAD")

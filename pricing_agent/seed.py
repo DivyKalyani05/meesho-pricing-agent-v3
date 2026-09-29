@@ -26,7 +26,7 @@ N_COMPETITOR_SELLERS = 260
 # Ground-truth price sensitivity by occasion (the engine never reads these).
 TRUE_SENSITIVITY = {"daily": 3.6, "office": 3.2, "festive": 2.6, "party": 2.8}
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # Demo sellers with hand-designed catalogues. Each variant = (colour, popularity, units in stock).
 # Rangreza and Sanganeri compete head-on in Jaipur cotton; Surat Silk Mart and Lucknow Chikan Studio
@@ -351,7 +351,7 @@ def build(db_path: str = DB_PATH, verbose: bool = True) -> str:
         cogs = int(round(cogs_true)) if is_demo else None
         products.append((pid, catalog_id, s_id, cat_id[ptype], title, desc, fabric, pattern, sleeve, length,
                          occasion, color, sizes, n_images, weight, pkg, mrp, final_price, cogs,
-                         listed.isoformat(), status, None))
+                         listed.isoformat(), status, None, "seed"))
         inventory.append((pid, stock, snapshot.isoformat()))
 
     cid_counter = 5000
@@ -398,7 +398,7 @@ def build(db_path: str = DB_PATH, verbose: bool = True) -> str:
             cid_counter += 1
 
     con.executemany("INSERT INTO catalogs VALUES (?,?,?,?)", catalogs)
-    con.executemany("INSERT INTO products VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", products)
+    con.executemany("INSERT INTO products VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", products)
     con.executemany("INSERT INTO inventory VALUES (?,?,?)", inventory)
     con.executemany("INSERT OR REPLACE INTO price_history VALUES (?,?,?)", price_hist)
     con.executemany("INSERT INTO daily_product_metrics VALUES (?,?,?,?,?,?,?,?)", metrics)

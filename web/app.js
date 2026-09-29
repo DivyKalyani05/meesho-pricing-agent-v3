@@ -2,7 +2,9 @@
 /* Kurti Pricing Agent - front end (vanilla JS, no external dependencies) */
 
 const state = { meta: null, result: null, lang: "en", photos: [], touched: new Set(), dbLoaded: false, busy: false,
-  lastBody: null, listed: null, lSeller: null, lMode: "balanced", lData: null, lFilter: "all", lOpen: new Set() };
+  lastBody: null, listed: null, lSeller: null, lMode: "balanced", lData: null, lFilter: "all", lOpen: new Set(),
+  ai: {}, lAi: {}, confirmDelist: null, toast: null,
+  db: { schema: null, table: null, page: 1, size: 25, q: "", filterCol: "", filterVal: "", sort: "", dir: "asc" } };
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 const form = $("#form");
@@ -37,6 +39,7 @@ async function api(path, body) {
 
 // ------------------------------------------------------------------ setup
 async function init() {
+  try { await api("/api/demo/restore", {}); } catch (e) { /* not critical */ }
   try {
     state.meta = await api("/api/meta");
   } catch (e) {
@@ -71,6 +74,7 @@ async function init() {
   $$(".examples .chip").forEach(b => b.addEventListener("click", () => loadExample(Number(b.dataset.example)).catch(showFormError)));
   form.addEventListener("submit", e => { e.preventDefault(); submit(); });
   $$(".tab").forEach(b => b.addEventListener("click", () => switchTab(b.dataset.tab)));
+  $("#db-select").addEventListener("change", e => openTable(e.target.value));
 }
 
 function showFormError(e) {
@@ -215,6 +219,7 @@ async function submit() {
     state.lastBody = body;
     state.listed = null;
     render();
+    narratePricing(result);
     if (window.innerWidth <= 960) $("#results").scrollIntoView({ behavior: "smooth" });
   } catch (e) {
     errBox.textContent = e.message;
@@ -288,7 +293,7 @@ function render() {
   ${notes.length ? `<div class="panel alert"><div class="notes">${notes.map(noteRow).join("")}</div></div>` : ""}
 
   <div class="panel">
-    <div class="panel-head"><h2>${T("Why this price", "यह कीमत क्यों")}</h2></div>
+    <div class="panel-head"><h2>${T("Why this price", "यह कीमत क्यों")}</h2>${aiBadge(r)}</div>
     <div class="ledger">${ex.reasons.map(rs => `
       <div class="ledger-row">
         <div class="ledger-label">${esc(tr(rs.title))}</div>
@@ -372,6 +377,33 @@ function render() {
   if (gl) gl.addEventListener("click", e => { e.preventDefault(); state.lSeller = String(state.listed.seller_id); switchTab("listings"); window.scrollTo(0, 0); });
   drawDistribution($("#chart-dist"), r);
   drawCurve($("#chart-curve"), r);
+}
+
+// ------------------------------------------------------------------ AI explanations (template text is the fallback)
+function aiBadge(r) {
+  const st = state.ai[r.recommendation_id];
+  if (!state.meta.llm || !state.meta.llm.enabled || !st) return "";
+  if (st === "loading") return `<span class="ai-badge"><span class="spinner"></span>Writing a clearer explanation…</span>`;
+  if (st === "ai") return `<span class="ai-badge on" title="Rewritten by an AI model. Every number was checked against the pricing engine.">AI-written · numbers checked</span>`;
+  return `<span class="ai-badge" title="The AI explanation was unavailable, so the standard explanation is shown.">Standard explanation</span>`;
+}
+
+async function narratePricing(result) {
+  const id = result.recommendation_id;
+  if (!state.meta.llm || !state.meta.llm.enabled || !id || state.ai[id]) return;
+  state.ai[id] = "loading";
+  if (state.result === result) render();
+  let out = { source: "template" };
+  try { out = await api("/api/narrate/pricing", { recommendation_id: id }); } catch (e) { /* keep template */ }
+  if (out.source === "ai") {
+    const ex = result.explanation;
+    ex.headline = out.headline;
+    ex.summary = out.summary;
+    ex.reasons.forEach((r, i) => { r.text = out.reasons[i]; });
+    ex.tips = out.tips;
+  }
+  state.ai[id] = out.source === "ai" ? "ai" : "template";
+  if (state.result === result) render();
 }
 
 function noteRow([kind, label, text]) {
@@ -563,29 +595,135 @@ const TABLE_INFO = {
   fabric_seasonality: ["Reference", "Monthly demand index by fabric (cotton peaks in summer, silk at festivals)."],
   pricing_recommendations: ["Agent output", "Every recommendation the agent made - input, price and reasoning - for learning and audit."],
 };
+const DB_GROUPS = ["Catalogue", "Sellers", "Performance", "Reference", "Agent output"];
+
 async function loadDb() {
-  $("#tables").innerHTML = `<div class="card muted"><span class="spinner"></span>Loading…</div>`;
-  try {
-    const { tables } = await api("/api/db");
-    state.dbLoaded = true;
-    const groups = {};
-    tables.forEach(t => { const g = (TABLE_INFO[t.table] || ["Other"])[0]; (groups[g] = groups[g] || []).push(t); });
-    $("#er").innerHTML = Object.entries(groups).map(([g, ts]) => `
-      <div class="er-group"><h3>${esc(g)}</h3>${ts.map(t => `<a href="#t-${esc(t.table)}">${esc(t.table)}<span>${num(t.rows, 0)}</span></a>`).join("")}</div>`).join("");
-    $("#tables").innerHTML = tables.map(t => {
-      const fkCols = new Set(t.foreign_keys.map(f => f.column));
-      return `<div class="card tbl-card" id="t-${esc(t.table)}">
-        <h2><code>${esc(t.table)}</code><span class="muted small">${num(t.rows, 0)} rows</span></h2>
-        <p class="muted small">${esc((TABLE_INFO[t.table] || ["", ""])[1])}</p>
-        <div class="cols">${t.columns.map(c => `<span class="col${c.pk ? " pk" : ""}${fkCols.has(c.name) ? " fk" : ""}" title="${esc(c.type)}">${c.pk ? "🔑 " : ""}${esc(c.name)}</span>`).join("")}</div>
-        ${t.foreign_keys.length ? `<p class="small muted">Links: ${t.foreign_keys.map(f => `${esc(f.column)} → <a href="#t-${esc(f.ref_table)}">${esc(f.ref_table)}</a>`).join(" · ")}</p>` : ""}
-        ${t.sample.length ? `<div class="table-wrap"><table class="sample"><thead><tr>${t.sample_columns.map(c => `<th>${esc(c)}</th>`).join("")}</tr></thead>
-          <tbody>${t.sample.map(row => `<tr>${row.map(v => `<td title="${esc(v)}">${esc(v === null ? "NULL" : v)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>` : `<p class="muted small">No rows yet.</p>`}
-      </div>`;
-    }).join("");
-  } catch (e) {
-    $("#tables").innerHTML = `<div class="card error">${esc(e.message)}</div>`;
+  const box = $("#db-main");
+  if (!state.db.schema) {
+    box.innerHTML = `<div class="panel muted"><span class="spinner"></span>Loading…</div>`;
+    try {
+      state.db.schema = (await api("/api/db/schema")).tables;
+    } catch (e) {
+      box.innerHTML = `<div class="panel error">${esc(e.message)}</div>`;
+      return;
+    }
   }
+  state.dbLoaded = true;
+  renderDbNav();
+  if (!state.db.table) state.db.table = "products";
+  await loadDbTable();
+}
+
+function renderDbNav() {
+  const tables = state.db.schema;
+  const groups = {};
+  tables.forEach(t => { const g = (TABLE_INFO[t.table] || ["Other"])[0]; (groups[g] = groups[g] || []).push(t); });
+  const order = [...DB_GROUPS.filter(g => groups[g]), ...Object.keys(groups).filter(g => !DB_GROUPS.includes(g))];
+  $("#db-nav").innerHTML = order.map(g => `<div class="db-nav-group"><div class="db-nav-title">${esc(g)}</div>
+    ${groups[g].map(t => `<button class="db-nav-item${state.db.table === t.table ? " active" : ""}" data-t="${esc(t.table)}">
+      <span>${esc(t.table)}</span><span class="n">${num(t.rows, 0)}</span></button>`).join("")}</div>`).join("");
+  $("#db-select").innerHTML = order.map(g => `<optgroup label="${esc(g)}">${groups[g].map(t =>
+    `<option value="${esc(t.table)}"${state.db.table === t.table ? " selected" : ""}>${esc(t.table)} (${num(t.rows, 0)})</option>`).join("")}</optgroup>`).join("");
+  $$("#db-nav .db-nav-item").forEach(b => b.addEventListener("click", () => openTable(b.dataset.t)));
+}
+
+function openTable(name, filterCol = "", filterVal = "") {
+  Object.assign(state.db, { table: name, page: 1, q: "", sort: "", dir: "asc", filterCol, filterVal });
+  renderDbNav();
+  loadDbTable();
+  if (window.innerWidth < 900) $("#db-main").scrollIntoView({ behavior: "smooth" });
+}
+
+async function loadDbTable() {
+  const d = state.db;
+  const params = new URLSearchParams({ name: d.table, page: d.page, size: d.size, q: d.q, sort: d.sort, dir: d.dir,
+    filter_col: d.filterCol, filter_val: d.filterVal });
+  const box = $("#db-data");
+  if (box) box.classList.add("loading");
+  let res;
+  try {
+    res = await api(`/api/db/table?${params}`);
+  } catch (e) {
+    $("#db-main").innerHTML = `<div class="panel error">${esc(e.message)}</div>`;
+    return;
+  }
+  d.page = res.page;
+  renderDbTable(res, params);
+}
+
+function renderDbTable(res, params) {
+  const d = state.db;
+  const meta = state.db.schema.find(t => t.table === res.table) || { referenced_by: [], rows: res.total };
+  const cols = res.columns;
+  const csvParams = new URLSearchParams(params);
+  csvParams.delete("page"); csvParams.delete("size");
+  const sortMark = c => d.sort === c ? (d.dir === "asc" ? " ▲" : " ▼") : "";
+  const cell = (v, c) => {
+    if (v === null || v === undefined) return `<span class="null">NULL</span>`;
+    if (c.fk) return `<button class="cell-link" data-t="${esc(c.fk.table)}" data-c="${esc(c.fk.column)}" data-v="${esc(v)}" title="Open ${esc(c.fk.table)} row">${esc(v)}</button>`;
+    return esc(v);
+  };
+  const first = (res.page - 1) * res.size + 1, last = Math.min(res.total, res.page * res.size);
+  $("#db-main").innerHTML = `
+    <div class="panel">
+      <div class="panel-head"><div>
+        <h2 class="mono">${esc(res.table)}</h2>
+        <div class="panel-sub">${esc((TABLE_INFO[res.table] || ["", ""])[1])}</div>
+      </div><div class="muted small">${num(meta.rows, 0)} rows · ${cols.length} columns</div></div>
+      <details class="structure">
+        <summary>Structure</summary>
+        <div class="table-wrap"><table class="schema">
+          <thead><tr><th>Column</th><th>Type</th><th>Key</th><th>Links to</th></tr></thead>
+          <tbody>${cols.map(c => `<tr><td class="mono">${esc(c.name)}</td><td class="muted mono">${esc(c.type)}</td>
+            <td>${c.pk ? "Primary key" : (c.fk ? "Foreign key" : "")}</td>
+            <td>${c.fk ? `<button class="btn-link table-link" data-t="${esc(c.fk.table)}">${esc(c.fk.table)}.${esc(c.fk.column)}</button>` : ""}</td></tr>`).join("")}
+          </tbody></table></div>
+        ${meta.referenced_by.length ? `<p class="small muted" style="margin:10px 0 0">Used by: ${meta.referenced_by.map(t =>
+          `<button class="btn-link table-link" data-t="${esc(t)}">${esc(t)}</button>`).join(", ")}</p>` : ""}
+      </details>
+    </div>
+
+    <div class="panel data-panel">
+      <div class="data-tools">
+        <input type="search" id="db-q" placeholder="Search this table" value="${esc(d.q)}" aria-label="Search this table">
+        <label class="inline">Rows <select id="db-size">${[25, 50, 100].map(n => `<option${n === d.size ? " selected" : ""}>${n}</option>`).join("")}</select></label>
+        <a class="btn-secondary" href="/api/db/export.csv?${csvParams}" download="${esc(res.table)}.csv">${res.total > 20000 ? "Download CSV (first 20,000 rows)" : "Download CSV"}</a>
+      </div>
+      ${d.filterCol ? `<div class="filter-chip">Showing rows where <b class="mono">${esc(d.filterCol)} = ${esc(d.filterVal)}</b>
+        <button class="btn-link" id="db-clear-filter">Show all rows</button></div>` : ""}
+      <div class="table-wrap" id="db-data"><table class="data">
+        <thead><tr>${cols.map(c => `<th><button class="sort" data-c="${esc(c.name)}">${esc(c.name)}${sortMark(c.name)}</button></th>`).join("")}</tr></thead>
+        <tbody>${res.rows.length ? res.rows.map(r => `<tr>${r.map((v, i) => `<td>${cell(v, cols[i])}</td>`).join("")}</tr>`).join("")
+          : `<tr><td colspan="${cols.length}" class="muted">No rows match.</td></tr>`}</tbody>
+      </table></div>
+      <div class="pager">
+        <span class="muted small">${res.total ? `${num(first, 0)}–${num(last, 0)} of ${num(res.total, 0)}` : "0 rows"}</span>
+        <div class="pager-btns">
+          <button class="btn-secondary" id="db-prev"${res.page <= 1 ? " disabled" : ""}>Previous</button>
+          <span class="small">Page ${res.page} of ${res.pages}</span>
+          <button class="btn-secondary" id="db-next"${res.page >= res.pages ? " disabled" : ""}>Next</button>
+        </div>
+      </div>
+    </div>`;
+
+  let t = null;
+  $("#db-q").addEventListener("input", e => {
+    clearTimeout(t);
+    t = setTimeout(() => { d.q = e.target.value.trim(); d.page = 1; loadDbTable().then(() => { const q = $("#db-q"); q.focus(); q.setSelectionRange(q.value.length, q.value.length); }); }, 350);
+  });
+  $("#db-size").addEventListener("change", e => { d.size = Number(e.target.value); d.page = 1; loadDbTable(); });
+  $("#db-prev").addEventListener("click", () => { d.page -= 1; loadDbTable(); });
+  $("#db-next").addEventListener("click", () => { d.page += 1; loadDbTable(); });
+  const clear = $("#db-clear-filter");
+  if (clear) clear.addEventListener("click", () => { d.filterCol = ""; d.filterVal = ""; d.page = 1; loadDbTable(); });
+  $$("#db-main .sort").forEach(b => b.addEventListener("click", () => {
+    const c = b.dataset.c;
+    d.dir = d.sort === c && d.dir === "asc" ? "desc" : "asc";
+    d.sort = c; d.page = 1;
+    loadDbTable();
+  }));
+  $$("#db-main .table-link").forEach(b => b.addEventListener("click", () => openTable(b.dataset.t)));
+  $$("#db-main .cell-link").forEach(b => b.addEventListener("click", () => openTable(b.dataset.t, b.dataset.c, b.dataset.v)));
 }
 
 // ------------------------------------------------------------------ list a product (pricing page)
@@ -670,6 +808,7 @@ function renderListings() {
       <p class="muted">Price a kurti on the Price a product page and press List. It will show up here with its launch plan.</p>
       <button class="btn-primary" id="l-go-price" style="margin-top:8px">Price a product</button></div>`;
     $("#l-go-price").addEventListener("click", () => { switchTab("price"); fe("seller_id").value = String(d.seller.seller_id); sellerHint(); });
+    renderToast();
     return;
   }
   const upl = s.profit_uplift;
@@ -700,6 +839,58 @@ function renderListings() {
     renderListings();
   }));
   $$("#l-groups .apply").forEach(b => b.addEventListener("click", () => applyPrice(Number(b.dataset.pid), Number(b.dataset.price), b)));
+  $$("#l-groups .delist").forEach(b => b.addEventListener("click", () => { state.confirmDelist = Number(b.dataset.pid); renderListings(); }));
+  $$("#l-groups .delist-cancel").forEach(b => b.addEventListener("click", () => { state.confirmDelist = null; renderListings(); }));
+  $$("#l-groups .delist-yes").forEach(b => b.addEventListener("click", () => delist(Number(b.dataset.pid), b)));
+  renderToast();
+  for (const id of state.lOpen) {
+    const v = all.find(x => x.product_id === id);
+    if (v) narrateListing(v);
+  }
+}
+
+function aiKey(v) { return `${v.product_id}|${state.lMode}|${v.current_price}|${v.recommended_price}`; }
+
+async function narrateListing(v) {
+  if (!state.meta.llm || !state.meta.llm.enabled || v.action === "new") return;
+  const key = aiKey(v);
+  if (state.lAi[key]) return;
+  state.lAi[key] = { status: "loading" };
+  let out = { source: "template" };
+  try { out = await api("/api/narrate/listing", { product_id: v.product_id, mode: state.lMode }); } catch (e) { /* keep template */ }
+  state.lAi[key] = out.source === "ai" ? { status: "ai", summary: out.summary, points: out.points } : { status: "template" };
+  if (state.lOpen.has(v.product_id) && !$("#tab-listings").hidden) renderListings();
+}
+
+function renderToast() {
+  const el = $("#l-toast");
+  const t = state.toast;
+  if (!t) { el.innerHTML = ""; return; }
+  el.innerHTML = `<div class="toast"><span>Delisted <b>${esc(t.title)}</b>. It is no longer visible to buyers.</span>
+    <button class="btn-link" id="undo-delist">Undo</button><button class="toast-x" id="close-toast" aria-label="Dismiss">×</button></div>`;
+  $("#undo-delist").addEventListener("click", async () => {
+    try { await api("/api/listings/relist", { product_id: t.pid }); } catch (e) { /* ignore */ }
+    state.toast = null;
+    loadListings();
+  });
+  $("#close-toast").addEventListener("click", () => { state.toast = null; renderToast(); });
+}
+
+async function delist(pid, btn) {
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spinner"></span>Delisting…`;
+  try {
+    const out = await api("/api/listings/delist", { product_id: pid });
+    state.confirmDelist = null;
+    state.lOpen.delete(pid);
+    state.toast = { pid, title: out.title };
+    await loadListings();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = "Yes, delist";
+    btn.insertAdjacentHTML("afterend", `<span class="bad-t small">${esc(e.message)}</span>`);
+  }
 }
 
 function rivalsCard(d) {
@@ -773,10 +964,16 @@ function detailRow(v) {
   };
   const days = x => x === null ? "–" : (x >= 999 ? "999+" : num(x, 0));
   const changed = v.recommended_price !== v.current_price;
+  const ai = state.lAi[aiKey(v)] || {};
+  const texts = ai.status === "ai" ? ai.points : v.reasons.map(r => r.text);
+  const badge = ai.status === "loading" ? `<span class="ai-badge"><span class="spinner"></span>Writing…</span>`
+    : (ai.status === "ai" ? `<span class="ai-badge on" title="Rewritten by an AI model. Every number was checked against the pricing engine.">AI-written · numbers checked</span>` : "");
+  const confirming = state.confirmDelist === v.product_id;
   return `<tr class="detail"><td colspan="8"><div class="detail-grid">
     <div>
-      <h4>${changed ? `Why ${inr(v.recommended_price)}` : `Why hold at ${inr(v.current_price)}`}</h4>
-      <ul class="why">${v.reasons.map(r => `<li><span class="why-k ${esc(r.tone)}">${esc(REASON_LABEL[r.icon] || "Note")}</span><span>${esc(r.text)}</span></li>`).join("")}</ul>
+      <div class="why-head"><h4>${changed ? `Why ${inr(v.recommended_price)}` : `Why hold at ${inr(v.current_price)}`}</h4>${badge}</div>
+      ${ai.status === "ai" ? `<p class="ai-summary">${esc(ai.summary)}</p>` : ""}
+      <ul class="why">${v.reasons.map((r, i) => `<li><span class="why-k ${esc(r.tone)}">${esc(REASON_LABEL[r.icon] || "Note")}</span><span>${esc(texts[i])}</span></li>`).join("")}</ul>
       ${v.target_price && v.target_price > v.recommended_price ? `<div class="target">The model sees room up to <b>${inr(v.target_price)}</b>. Raise in steps of up to 10% and check again after about 14 days, because a big jump can cost search ranking.</div>` : ""}
     </div>
     <div>
@@ -793,9 +990,15 @@ function detailRow(v) {
       <p class="detail-foot">Cost ${inr(v.cogs)} · break-even ${inr(v.break_even)} · returns ${num(v.return_rate_pct, 1)}% · RTO ${num(v.rto_rate_pct, 1)}% · market ${inr(v.market_p25)}–${inr(v.market_p75)}</p>
       ${sparks(v)}
       <div class="apply-row">
-        ${changed ? `<button class="btn-primary apply" data-pid="${v.product_id}" data-price="${v.recommended_price}">Apply ${inr(v.recommended_price)}</button>
-          <span class="vs">Updates the live price and records it in price history.</span>` : `<span class="vs">No change needed right now.</span>`}
+        ${changed ? `<button class="btn-primary apply" data-pid="${v.product_id}" data-price="${v.recommended_price}">Apply ${inr(v.recommended_price)}</button>` : `<span class="vs">No price change needed right now.</span>`}
+        <button class="btn-danger delist" data-pid="${v.product_id}"${confirming ? " hidden" : ""}>Delist</button>
       </div>
+      ${confirming ? `<div class="confirm">
+        <p><b>Delist ${esc(v.title)}?</b> It will be removed from sale and buyers won't find it on Meesho.
+          ${v.origin === "seed" ? "This is an example listing, so it comes back when the page is reloaded." : "You can undo this right after."}</p>
+        <div class="confirm-actions"><button class="btn-danger solid delist-yes" data-pid="${v.product_id}">Yes, delist</button>
+          <button class="btn-secondary delist-cancel">Cancel</button></div>
+      </div>` : ""}
     </div>
   </div></td></tr>`;
 }

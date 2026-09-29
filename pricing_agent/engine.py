@@ -11,6 +11,7 @@ Pipeline
 """
 import json
 import math
+from collections import OrderedDict
 import sqlite3
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
@@ -282,6 +283,7 @@ class PricingAgent:
     def __init__(self, db_path: str):
         self.db_path = db_path
         self.market = Market(db_path)
+        self.recent = OrderedDict()
 
     def meta(self):
         demo = [{"seller_id": s["seller_id"], "name": s["seller_name"], "city": s["city"], "tier": s["tier"],
@@ -447,6 +449,9 @@ class PricingAgent:
         result["explanation"] = build_explanation(result, cf, best, inp, eco, base_sc)
         if save:
             result["recommendation_id"] = self._save(inp, raw, result)
+            self.recent[result["recommendation_id"]] = result      # kept for the AI explanation step
+            while len(self.recent) > 200:
+                self.recent.popitem(last=False)
         return result
 
     # ------------------------------------------------------------------ listing actions
@@ -496,11 +501,11 @@ class PricingAgent:
                 pid = next_pid + k
                 title = base_title if color == "Multicolour" else f"{color} {base_title}"
                 desc = inp["description"] or title
-                con.execute("INSERT INTO products VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                con.execute("INSERT INTO products VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                             (pid, catalog_id, inp["seller_id"], cat_id, title, desc, attrs["fabric"], attrs["pattern"],
                              attrs["sleeve"], attrs["length"], attrs["occasion"], color, "S,M,L,XL,XXL",
                              max(1, inp["n_photos"]), pkg["product_weight_g"], pkg["package_size"], mrp, price,
-                             int(round(inp["cogs"])), listed, "active", rec_id))
+                             int(round(inp["cogs"])), listed, "active", rec_id, "seller"))
                 con.execute("INSERT INTO inventory VALUES (?,?,?)", (pid, per + (1 if k < extra else 0), listed))
                 con.execute("INSERT INTO price_history VALUES (?,?,?)", (pid, listed, price))
                 ids.append(pid)
@@ -530,6 +535,37 @@ class PricingAgent:
             con.close()
         self.market.set_price(pid, price)
         return {"product_id": pid, "price": price, "effective_from": today}
+
+    def set_status(self, raw: dict, status: str) -> dict:
+        """Delist or relist one listing."""
+        if not isinstance(raw, dict):
+            raise InputError("Invalid request.")
+        pid = _num(raw, "product_id", required=True, integer=True, label="product")
+        prod = next((p for p in self.market.products if p["product_id"] == pid), None)
+        if prod is None or prod["status"] == "paused":
+            raise InputError("Listing not found.")
+        con = sqlite3.connect(self.db_path)
+        try:
+            con.execute("UPDATE products SET status=? WHERE product_id=?", (status, pid))
+            con.commit()
+        finally:
+            con.close()
+        self.market.set_status(pid, status)
+        return {"product_id": pid, "status": status, "title": prod["title"], "origin": prod.get("origin", "seed")}
+
+    def restore_examples(self) -> dict:
+        """Bring back demo (seed) listings that someone delisted - runs on every page load."""
+        gone = [p["product_id"] for p in self.market.products if p["status"] == "delisted" and p.get("origin") == "seed"]
+        if gone:
+            con = sqlite3.connect(self.db_path)
+            try:
+                con.executemany("UPDATE products SET status='active' WHERE product_id=?", [(i,) for i in gone])
+                con.commit()
+            finally:
+                con.close()
+            for pid in gone:
+                self.market.set_status(pid, "active")
+        return {"restored": len(gone)}
 
     def _save(self, inp, raw, result):
         con = sqlite3.connect(self.db_path)

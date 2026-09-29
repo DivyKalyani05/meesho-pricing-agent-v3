@@ -28,10 +28,25 @@ This opens http://127.0.0.1:8000. On first run it generates the database in abou
 
 - `python3 run.py --rebuild` regenerates the marketplace data and clears saved recommendations.
 - `python3 run.py --port 9000 --no-browser`
-- `python3 -m unittest -v` runs 30 end-to-end tests: data integrity, model recovery, pricing logic,
-  repricing guard rails, the list → reprice → apply flow, the HTTP API and a 150-case fuzz test.
+- `python3 -m unittest -v` runs 40 end-to-end tests: data integrity, model recovery, pricing logic,
+  repricing guard rails, the list → reprice → apply → delist flow, AI-text checks (with a fake model), the data browser, the HTTP API and a 150-case fuzz test.
 - The database rebuilds automatically when the schema changes. `--rebuild` also wipes any listings
   and price changes made during a demo, so each demo starts clean.
+
+## AI-written explanations (optional)
+
+The prices never depend on an AI model. With a free API key, a model rewrites the explanations in fresher,
+plainer English and Hindi. Its text is shown only if every number in it matches the pricing engine; otherwise
+(or with no key, no quota or no internet) the built-in template text is used. The key stays on the server.
+
+1. Get a free key at [Google AI Studio](https://aistudio.google.com) → **Get API key** → **Create API key**.
+2. **Locally:** create a file named `.env` in this folder containing `GEMINI_API_KEY=your-key`. It is already
+   in `.gitignore`, so it never goes to GitHub. Restart `python3 run.py`; the console prints "AI explanations: gemini".
+3. **On Render:** open the service → **Environment** → **Add environment variable** → `GEMINI_API_KEY` = your key →
+   **Save changes**. Render redeploys automatically.
+
+Groq's free tier also works: use `GROQ_API_KEY` instead. `LLM_MODEL` overrides the model name.
+On Gemini the model is chosen automatically if the default is retired.
 
 ## 3-minute demo script
 
@@ -128,6 +143,9 @@ pricing_agent/
   engine.py                 validation, economics, optimiser, listing & price-change actions
   repricer.py               lifecycle repricing of live listings (variants, ageing stock, rivals)
   explain.py                plain-language reasons (English + Hindi)
+  llm.py                    tiny Gemini / Groq client (standard library only)
+  narrator.py               AI explanations with number checks and template fallback
+  dbview.py                 Data tab: paged, searchable, sortable table browser + CSV export
   server.py                 JSON API + static files
 web/                        UI (vanilla JS, hand-drawn SVG charts, works offline)
 tests/test_agent.py         end-to-end tests

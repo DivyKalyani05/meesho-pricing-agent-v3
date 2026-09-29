@@ -60,7 +60,8 @@ CREATE TABLE products (
     cogs             INTEGER,                       -- only known for our own sellers
     listed_on        DATE NOT NULL,
     status           TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','paused','delisted')),
-    recommendation_id INTEGER REFERENCES pricing_recommendations(recommendation_id)  -- set when listed via the agent
+    recommendation_id INTEGER REFERENCES pricing_recommendations(recommendation_id), -- set when listed via the agent
+    origin           TEXT NOT NULL DEFAULT 'seed' CHECK (origin IN ('seed','seller'))  -- demo data vs listed in the app
 );
 CREATE INDEX idx_products_segment ON products(category_id, fabric, pattern);
 CREATE INDEX idx_products_seller ON products(seller_id);

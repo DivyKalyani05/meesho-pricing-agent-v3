@@ -501,6 +501,7 @@ class Repricer:
                 tot["old_units"] += c["stock"] if c["is_old"] else 0
                 variants.append({
                     "product_id": pid, "title": c["p"]["title"], "color": c["p"]["color"],
+                    "origin": c["p"].get("origin", "seed"),
                     "listed_on": c["p"]["listed_on"], "age_days": c["age"], "stage": self._stage(c),
                     "stock": c["stock"], "current_price": c["p0"], "recommended_price": w["price"],
                     "change_pct": round(100 * (w["price"] / c["p0"] - 1), 1), "action": kind, "action_label": label,
@@ -550,6 +551,22 @@ class Repricer:
             "ageing_units": int(tot["old_units"]),
         }
         return dict(base, summary=summary, groups=out_groups, rivals=self._rivals(seller_id, prods, demo_ids))
+
+    def find_variant(self, product_id, mode="balanced"):
+        """(variant, design name, seller name, goal label) for one live listing, or None."""
+        try:
+            product_id = int(product_id)
+        except (TypeError, ValueError):
+            return None
+        prod = next((p for p in self.m.products if p["product_id"] == product_id and p["status"] == "active"), None)
+        if prod is None:
+            return None
+        data = self.seller_listings(prod["seller_id"], mode if mode in config.MODES else "balanced")
+        for g in data["groups"]:
+            for v in g["variants"]:
+                if v["product_id"] == product_id:
+                    return v, g["name"], data["seller"]["name"], data["mode_label"]
+        return None
 
     def _new_reasons(self, c, launch):
         out = [{"icon": "new", "tone": "neutral",

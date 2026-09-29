@@ -5,8 +5,10 @@ services:
     runtime: python
     plan: free
     buildCommand: python3 -m pricing_agent.seed   # builds the demo database (about 2 seconds)
-    startCommand: python3 run.py
+    startCommand: python3 run.py --host 0.0.0.0
     healthCheckPath: /api/health
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.7
+      - key: GEMINI_API_KEY      # free key from https://aistudio.google.com - set it in the Render dashboard
+        sync: false

@@ -128,6 +128,12 @@ class Market:
             if p["status"] == "active":
                 self.active.append(p)
 
+    def set_status(self, product_id, status):
+        for p in self.products:
+            if p["product_id"] == product_id:
+                p["status"] = status
+        self.active = [p for p in self.products if p["status"] == "active"]
+
     def set_price(self, product_id, price):
         for p in self.products:
             if p["product_id"] == product_id:
