@@ -46,7 +46,8 @@ plainer English and Hindi. Its text is shown only if every number in it matches 
    **Save changes**. Render redeploys automatically.
 
 Groq's free tier also works: use `GROQ_API_KEY` instead. `LLM_MODEL` overrides the model name.
-On Gemini the model is chosen automatically if the default is retired.
+On Gemini it uses the auto-updating `gemini-flash-latest` model and falls back to other free Gemini models
+when one is busy or out of quota.
 
 ## 3-minute demo script
 

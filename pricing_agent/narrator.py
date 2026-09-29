@@ -31,6 +31,8 @@ Hard rules:
 - Use ONLY the facts provided. Never invent numbers, percentages, dates, festivals, competitors or claims.
 - Every number you write must appear in the facts (you may round, e.g. 2.84 -> 2.8). Write amounts as ₹349.
 - Keep the same meaning and the same order as the drafts; do not merge, drop or add points.
+- Keep every specific detail from each draft: colour names, festival names, seller names, and each number it
+  uses. Make the wording better, not vaguer.
 - Avoid jargon such as "elasticity", "hedonic", "conversion rate optimisation".
 - Reply with JSON only, matching the requested shape exactly."""
 

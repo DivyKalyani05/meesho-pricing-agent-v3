@@ -21,7 +21,10 @@ import urllib.request
 
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta"
 GROQ_URL = "https://api.groq.com/openai/v1"
-DEFAULT_MODEL = {"gemini": "gemini-2.5-flash", "groq": "llama-3.3-70b-versatile"}
+DEFAULT_MODEL = {"gemini": "gemini-flash-latest", "groq": "llama-3.3-70b-versatile"}
+# tried in order when a model is busy (503), out of quota (429) or retired (404)
+GEMINI_FALLBACKS = ["gemini-flash-lite-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite"]
+RETRY_STATUSES = (404, 429, 500, 502, 503, 504)
 COOLDOWN_SECONDS = 300      # after an auth / quota error, stop calling for a while
 
 
@@ -88,7 +91,7 @@ class LLMClient:
             text = self._call(system, user, timeout)
         except LLMError as e:
             self.last_error = str(e)
-            if getattr(e, "status", None) in (401, 403, 429):
+            if getattr(e, "status", None) in (401, 403, 429):   # bad key, or every model out of quota
                 self._cooldown_until = time.time() + COOLDOWN_SECONDS
             raise
         try:
@@ -100,23 +103,36 @@ class LLMClient:
 
     # ------------------------------------------------------------------ providers
     def _call(self, system, user, timeout):
-        if self.provider == "gemini":
+        if self.provider != "gemini":
+            return self._groq(system, user, timeout)
+        deadline = time.time() + timeout
+        models = list(dict.fromkeys([self.model, *GEMINI_FALLBACKS]))
+        last = None
+        for i, model in enumerate(models):
+            left = deadline - time.time()
+            if left < 3:
+                break
             try:
-                return self._gemini(system, user, timeout)
+                text = self._gemini(model, system, user, left)
+                if model != self.model and getattr(last, "status", None) == 404:
+                    self.model = model          # the default is gone for good - stick with one that works
+                return text
             except LLMError as e:
-                # model retired or renamed -> pick a current "flash" model once and retry
-                if getattr(e, "status", None) in (400, 404) and not self._model_checked and self._pick_gemini_model(timeout):
-                    return self._gemini(system, user, timeout)
-                raise
-        return self._groq(system, user, timeout)
+                last = e
+                if getattr(e, "status", None) not in RETRY_STATUSES:
+                    raise
+        # every known model failed: if they were retired, discover a current one once
+        if getattr(last, "status", None) == 404 and not self._model_checked and self._pick_gemini_model(timeout):
+            return self._gemini(self.model, system, user, max(5, deadline - time.time()))
+        raise last or LLMError("no Gemini model available")
 
-    def _gemini(self, system, user, timeout):
+    def _gemini(self, model, system, user, timeout):
         body = {
             "system_instruction": {"parts": [{"text": system}]},
             "contents": [{"role": "user", "parts": [{"text": user}]}],
             "generationConfig": {"temperature": 0.8, "maxOutputTokens": 8192, "responseMimeType": "application/json"},
         }
-        out = _post(f"{GEMINI_URL}/models/{self.model}:generateContent", {"x-goog-api-key": self._key}, body, timeout)
+        out = _post(f"{GEMINI_URL}/models/{model}:generateContent", {"x-goog-api-key": self._key}, body, timeout)
         cands = out.get("candidates") or []
         if not cands:
             raise LLMError(f"no candidates ({out.get('promptFeedback', {}).get('blockReason', 'unknown')})")
