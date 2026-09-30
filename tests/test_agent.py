@@ -109,7 +109,11 @@ class TestModel(unittest.TestCase):
         self.assertAlmostEqual(eco.profit(eco.break_even()), 0, places=6)
         self.assertGreater(eco.profit(400), eco.profit(300))
         bd = eco.breakdown(349)
-        self.assertAlmostEqual(sum(l["amount"] for l in bd[:-1]), bd[-1]["amount"], delta=0.5)
+        total = next(l for l in bd if l.get("total"))
+        self.assertAlmostEqual(sum(l["amount"] for l in bd if not l.get("total") and not l.get("note")), total["amount"], delta=0.5)
+        self.assertEqual(bd[0]["amount"], 349)                                   # starts from the price the buyer sees
+        kept = next(l for l in bd if l.get("note"))
+        self.assertAlmostEqual(kept["amount"], total["amount"] / eco.kept, delta=0.1)
 
     def test_meesho_fee_rules(self):
         """Kept orders: no shipping. Returns: both legs. RTO: nothing. Transit: lost pieces."""

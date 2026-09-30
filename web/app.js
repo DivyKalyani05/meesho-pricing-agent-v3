@@ -343,7 +343,7 @@ function render() {
       ${moneyBar(r.economics.breakdown, rec.entry_price)}
       <details class="more-table"><summary>${T("Line by line", "पूरा हिसाब")}</summary>
         <table><tbody>${r.economics.breakdown.map(l => `
-          <tr class="${l.total ? "total" : ""}"><td>${icon(l.icon || "info", "i sm")} ${esc(l.label)}</td><td class="num ${l.amount < 0 ? "neg" : (l.total ? "pos" : "")}">${inr(l.amount, 1)}</td></tr>`).join("")}
+          <tr class="${l.total ? "total" : ""}${l.note ? " note-line" : ""}"><td>${icon(l.icon || "info", "i sm")} ${esc(l.label)}</td><td class="num ${l.amount < 0 ? "neg" : (l.total ? "pos" : "")}">${inr(l.amount, 1)}</td></tr>`).join("")}
         </tbody></table>
         <p class="muted small" style="margin:10px 0 0">No delivery charge on kept orders · returns pay both ways · RTO free. Rates are assumptions.</p>
       </details>

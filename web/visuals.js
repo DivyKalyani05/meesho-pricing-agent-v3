@@ -87,6 +87,7 @@ function moneyBar(breakdown, price) {
   const parts = [];
   const byIcon = ic => breakdown.find(l => l.icon === ic && !l.total);
   const profit = breakdown.find(l => l.total);
+  // the bar splits the money actually received (price minus unpaid orders)
   const add = (label, amt, cls, ic) => { if (amt > 0.5) parts.push({ label, amt, cls, ic }); };
   add("Your profit", Math.max(0, profit.amount), "m-profit", "wallet");
   add("Product cost", -(byIcon("tag") || { amount: 0 }).amount, "m-cost", "tag");

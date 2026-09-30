@@ -200,7 +200,8 @@ class Economics:
     def breakdown(self, p):
         k = self.kept
         lines = [
-            ("Money collected (orders kept)", k * p, "rupee"),
+            ("Price", p, "rupee"),
+            (f"Not paid: returns, RTO & lost in transit ({1 - k:.0%} of orders)", -(1 - k) * p, "percent"),
             (f"GST ({config.GST_RATE:.0%} of price)", -k * p * self.gst_share, "tax"),
             ("Product cost", -self.product_cost, "tag"),
             ("Packaging", -self.packaging, "box"),
@@ -213,7 +214,9 @@ class Economics:
         if config.PLATFORM_COMMISSION_PCT:
             lines.insert(2, ("Platform commission", -k * p * (1 - self.gst_share) * config.PLATFORM_COMMISSION_PCT, "tax"))
         return [{"label": l, "amount": round(v, 1), "icon": i} for l, v, i in lines] + \
-               [{"label": "Profit per order", "amount": round(self.profit(p), 1), "icon": "wallet", "total": True}]
+               [{"label": "Profit per order placed", "amount": round(self.profit(p), 1), "icon": "wallet", "total": True},
+                {"label": "Profit per kept order", "amount": round(self.profit(p) / k, 1) if k > 0 else 0.0,
+                 "icon": "check", "note": True}]
 
 
 # ---------------------------------------------------------------- demand scenario

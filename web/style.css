@@ -730,3 +730,4 @@ svg.i.xs { width: 13px; height: 13px; vertical-align: -2px; margin-right: 3px; }
 }
 .sc-cap { font-size: .72rem; font-weight: 650; color: var(--text-2); display: flex; justify-content: space-between; gap: 8px; margin-bottom: -6px; }
 .sc-cap span { font-weight: 400; color: var(--muted); }
+tr.note-line td { color: var(--text-2); font-style: italic; border-bottom: 0; }
