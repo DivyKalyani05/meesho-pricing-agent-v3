@@ -3,7 +3,7 @@
 
 const state = { meta: null, result: null, lang: "en", photos: [], touched: new Set(), dbLoaded: false, busy: false,
   lastBody: null, listed: null, lSeller: null, lMode: "balanced", lData: null, lFilter: "all", lOpen: new Set(),
-  ai: {}, lAi: {}, confirmDelist: null, toast: null,
+  ai: {}, lAi: {}, confirmDelist: null, toast: null, lView: "prices", saleEvent: null, saleData: null, saleOpen: new Set(),
   db: { schema: null, table: null, page: 1, size: 25, q: "", filterCol: "", filterVal: "", sort: "", dir: "asc" } };
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -164,13 +164,13 @@ async function detect(force) {
 const EXAMPLES = [
   { seller_id: "1", title: "Jaipuri Cotton Hand Block Print Kurti",
     description: "Pure cotton kurti, hand block printed in Jaipur. 3/4 sleeve, knee length. Perfect for daily and office wear.",
-    cogs: 150, inventory: 200, horizon_days: 30, mode: "balanced", photos: 5, hue: 200 },
+    cogs: 210, inventory: 200, horizon_days: 30, mode: "balanced", photos: 5, hue: 200 },
   { seller_id: "3", title: "Banarasi Silk Kurta Set with Dupatta",
     description: "Festive silk blend kurta set with zari embroidery and matching dupatta. Full sleeve, calf length. Ideal for Navratri, Diwali and weddings.",
-    cogs: 420, offline_price: 1299, offline_margin_pct: 45, inventory: 80, horizon_days: 30, mode: "balanced", photos: 6, hue: 330 },
+    cogs: 520, offline_price: 1299, offline_margin_pct: 45, inventory: 80, horizon_days: 30, mode: "balanced", photos: 6, hue: 330 },
   { seller_id: "2", title: "Rayon Printed Kurti with Palazzo",
     description: "Rayon printed kurti with palazzo pants, 3/4 sleeve, knee length. Comfortable office wear.",
-    cogs: 180, inventory: 120, horizon_days: 30, mode: "clear_inventory", expiry_date: "2026-11-15", limited_stock: true, photos: 3, hue: 40 },
+    cogs: 240, inventory: 120, horizon_days: 30, mode: "clear_inventory", expiry_date: "2026-11-15", limited_stock: true, photos: 3, hue: 40 },
 ];
 async function loadExample(i) {
   const ex = EXAMPLES[i];
@@ -250,6 +250,25 @@ async function submit() {
 }
 
 // ------------------------------------------------------------------ render results
+const PRICE_ICONS = { market: "store", cost: "shield", festival: "spark", season: "cal", new: "rocket", seller: "star", crowd: "users",
+  returns: "return", transit: "truck", stock: "box", shop: "store" };
+const GOAL_ICONS = { balanced: "scale", max_margin: "rupee", scale: "bolt", clear_inventory: "box" };
+
+function productLook(r) {
+  const colors = String((state.lastBody && state.lastBody.colors) || "").split(",").map(c => c.trim()).filter(Boolean);
+  const title = (r.input && r.input.title) || "";
+  return { color: colors.find(colorOf) || colorFromTitle(title) || "pink", pattern: r.attributes.pattern.label };
+}
+
+function reasonRow(icn, tone, title, text, effect) {
+  const first = firstSentence(text), rest = String(text || "").slice(first.length).trim();
+  return `<div class="ledger-row v2">
+    <div class="ledger-ic ${esc(tone)}">${icon(icn)}</div>
+    <div class="ledger-body"><div class="ledger-label">${esc(title)}</div>
+      <div class="ledger-text">${esc(first)}${rest ? `<span class="ledger-more" hidden> ${esc(rest)}</span> <button class="more-btn" type="button">More</button>` : ""}</div></div>
+    <div class="ledger-effect ${esc(tone)}">${esc(effect)}</div></div>`;
+}
+
 function render() {
   const r = state.result;
   if (!r) return;
@@ -260,23 +279,20 @@ function render() {
   const steady = rec.steady_price && rec.steady_price !== rec.entry_price;
   const L = state.lang === "hi";
   const T = (en, hi) => (L ? hi : en);
+  const look = productLook(r);
   const stats = [
-    [rec.orders_per_day >= 1 ? num(rec.orders_per_day, 1) : num(rec.orders_per_day, 2), T("orders a day", "ऑर्डर / दिन")],
-    [inr(rec.profit_per_order), T("profit per order", "मुनाफ़ा / ऑर्डर")],
-    [`${num(rec.margin_pct, 1)}%`, T("margin", "मार्जिन")],
-    [inr(rec.total_profit), windowText(rec, L).stat],
-    [rec.days_to_sell_out === null ? "–" : `${num(rec.days_to_sell_out, 0)} ${T("days", "दिन")}`,
-      T(`to sell ${rec.inventory} pieces`, `${rec.inventory} पीस बिकने में`)],
+    ["cart", rec.orders_per_day >= 1 ? num(rec.orders_per_day, 1) : num(rec.orders_per_day, 2), T("orders a day", "ऑर्डर / दिन")],
+    ["wallet", inr(rec.profit_per_order), T("profit per order", "मुनाफ़ा / ऑर्डर")],
+    ["percent", `${num(rec.margin_pct, 1)}%`, T("margin", "मार्जिन")],
+    ["rupee", inr(rec.total_profit), windowText(rec, L).stat],
+    ["clock", rec.days_to_sell_out === null ? "–" : `${num(rec.days_to_sell_out, 0)} ${T("days", "दिन")}`, T(`to sell ${rec.inventory} pcs`, `${rec.inventory} पीस बिकने में`)],
   ];
-  const notes = [
-    ...ex.warnings.map(w => ["warn", T("Check", "ध्यान दें"), tr(w)]),
-  ];
-  const tips = ex.tips.map(t => ["tip", T("Tip", "सुझाव"), tr(t)]);
+  const m = r.market;
 
   out.innerHTML = `
   <div class="panel">
     <div class="result-top">
-      <p class="eyebrow" style="margin:0">${T("Recommendation", "सुझाव")} · ${esc(rec.mode_label)}</p>
+      <p class="eyebrow" style="margin:0">${icon(GOAL_ICONS[rec.mode] || "target")} ${esc(rec.mode_label)}</p>
       <div class="lang" role="group" aria-label="Language">
         <button data-lang="en" class="${state.lang === "en" ? "active" : ""}">English</button>
         <button data-lang="hi" class="${state.lang === "hi" ? "active" : ""}">हिंदी</button>
@@ -284,47 +300,69 @@ function render() {
     </div>
     <div class="result-head">
       <div class="price-block">
-        <div class="big">${inr(rec.entry_price)}</div>
-        ${rec.suggested_mrp > rec.entry_price ? `<div class="mrp"><s>MRP ${inr(rec.suggested_mrp)}</s><span class="off">${rec.discount_shown_pct}% off</span></div>` : ""}
-        <div class="goal-note">${T("Launch price", "शुरुआती कीमत")}</div>
+        ${thumb(look.color, look.pattern, "xl")}
+        <div>
+          <div class="goal-note" style="margin:0 0 4px">${T("Launch price", "शुरुआती कीमत")}</div>
+          <div class="big">${inr(rec.entry_price)}</div>
+          ${rec.suggested_mrp > rec.entry_price ? `<div class="mrp"><s>MRP ${inr(rec.suggested_mrp)}</s><span class="off">${rec.discount_shown_pct}% off</span></div>` : ""}
+        </div>
       </div>
       <div>
         <div class="headline">${esc(tr(ex.headline))}</div>
         <p class="summary">${esc(tr(ex.summary))}</p>
         <div class="plan-line">
-          <div class="plan-pt on"><div class="k">${T("Launch", "लॉन्च")}</div><div class="v">${inr(rec.entry_price)}</div></div>
-          <div class="plan-pt${steady ? "" : " off-pt"}"><div class="k">${T("After 20–25 reviews", "20–25 रिव्यू के बाद")}</div><div class="v">${steady ? inr(rec.steady_price) : T("Hold", "यही रखें")}</div></div>
-          <div class="plan-pt floor"><div class="k">${T("Never go below", "इससे कम नहीं")}</div><div class="v">${inr(rec.break_even_price)}</div></div>
+          <div class="plan-pt on"><div class="k">${icon("rocket")}${T("Launch", "लॉन्च")}</div><div class="v">${inr(rec.entry_price)}</div></div>
+          <div class="plan-pt"><div class="k">${icon("star")}${T("After 20–25 reviews", "20–25 रिव्यू के बाद")}</div><div class="v">${steady ? inr(rec.steady_price) : T("Hold", "यही रखें")}</div></div>
+          <div class="plan-pt floor"><div class="k">${icon("shield")}${T("Never below", "इससे कम नहीं")}</div><div class="v">${inr(rec.break_even_price)}</div></div>
         </div>
         <div class="list-row">
           ${state.listed
-            ? `<button class="btn-primary done" disabled>${T("Listed", "लिस्ट हो गया")}</button>
+            ? `<button class="btn-primary done" disabled>${icon("check")}${T("Listed", "लिस्ट हो गया")}</button>
                <span class="list-msg">${esc(state.listed.msg)} <a href="#" id="go-listings">${T("Open My listings", "मेरी लिस्टिंग खोलें")}</a></span>`
-            : `<button class="btn-primary" id="list-btn">${T(`List at ${inr(rec.entry_price)}`, `₹${rec.entry_price} पर लिस्ट करें`)}</button>
-               <span class="list-msg" id="list-msg">${T("Creates one listing per colour in My listings.", "“मेरी लिस्टिंग” में हर रंग की एक लिस्टिंग बनेगी।")}</span>`}
+            : `<button class="btn-primary" id="list-btn">${icon("tag")}${T(`List at ${inr(rec.entry_price)}`, `₹${rec.entry_price} पर लिस्ट करें`)}</button>
+               <span class="list-msg" id="list-msg"></span>`}
         </div>
       </div>
     </div>
-    <div class="stat-strip">${stats.map(([v, k]) => `<div class="stat"><div class="stat-v">${esc(v)}</div><div class="stat-k">${esc(k)}</div></div>`).join("")}</div>
+    <div class="stat-strip">${stats.map(([ic, v, k]) => `<div class="stat"><div class="stat-ic">${icon(ic)}</div><div class="stat-v">${esc(v)}</div><div class="stat-k">${esc(k)}</div></div>`).join("")}</div>
   </div>
 
-  ${notes.length ? `<div class="panel alert"><div class="notes">${notes.map(noteRow).join("")}</div></div>` : ""}
+  ${ex.warnings.length ? `<div class="panel alert"><div class="notes">${ex.warnings.map(w => `<div class="note-row i"><span class="note-ic warn">${icon("warn")}</span><div>${esc(tr(w))}</div></div>`).join("")}</div></div>` : ""}
 
   <div class="panel">
     <div class="panel-head"><h2>${T("Why this price", "यह कीमत क्यों")}</h2>${aiBadge(r)}</div>
-    <div class="ledger">${ex.reasons.map(rs => `
-      <div class="ledger-row">
-        <div class="ledger-label">${esc(tr(rs.title))}</div>
-        <div class="ledger-text">${esc(tr(rs.text))}</div>
-        <div class="ledger-effect ${esc(rs.tone)}">${esc(rs.effect)}</div>
-      </div>`).join("")}
+    ${priceLadder({ p10: m.price_p10, p25: m.price_p25, p75: m.price_p75, p90: m.price_p90, best: m.sales_weighted_median,
+      breakEven: rec.break_even_price, you: rec.entry_price, youLabel: T("You", "आप"), shop: r.offline ? r.offline.offline_price : null })}
+    <div class="ledger">${ex.reasons.map(rs => reasonRow(PRICE_ICONS[rs.icon] || "info", rs.tone, tr(rs.title), tr(rs.text), rs.effect)).join("")}</div>
+  </div>
+
+  <div class="row2">
+    <div class="panel">
+      <div class="panel-head"><div><h2>${icon("wallet", "i h")}${T("Where the money goes", "पैसा कहाँ जाता है")}</h2>
+        <div class="panel-sub">${T(`Per order at ${inr(rec.entry_price)}`, `₹${rec.entry_price} पर प्रति ऑर्डर`)}</div></div></div>
+      ${moneyBar(r.economics.breakdown, rec.entry_price)}
+      <details class="more-table"><summary>${T("Line by line", "पूरा हिसाब")}</summary>
+        <table><tbody>${r.economics.breakdown.map(l => `
+          <tr class="${l.total ? "total" : ""}"><td>${icon(l.icon || "info", "i sm")} ${esc(l.label)}</td><td class="num ${l.amount < 0 ? "neg" : (l.total ? "pos" : "")}">${inr(l.amount, 1)}</td></tr>`).join("")}
+        </tbody></table>
+        <p class="muted small" style="margin:10px 0 0">No delivery charge on kept orders · returns pay both ways · RTO free. Rates are assumptions.</p>
+      </details>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><div><h2>${icon("target", "i h")}${T("Compare goals", "लक्ष्यों की तुलना")}</h2>
+        <div class="panel-sub">${windowText(rec, L).table}</div></div></div>
+      <div class="goals-grid">${Object.entries(r.modes).map(([k, g]) => `
+        <div class="goal-card${k === rec.mode ? " on" : ""}"><div class="gc-ic">${icon(GOAL_ICONS[k])}</div>
+          <div class="gc-name">${esc(g.label)}</div><div class="gc-price">${inr(g.price)}</div>
+          <div class="gc-row"><span>${icon("cart", "i sm")}${num(g.orders_per_day, 1)}/day</span><span class="${g.total_profit < 0 ? "neg" : ""}">${icon("rupee", "i sm")}${inr(g.total_profit)}</span></div></div>`).join("")}
+      </div>
     </div>
   </div>
 
   <div class="row2">
     <div class="panel chart">
       <div class="panel-head"><div><h2>${T("Where your price sits", "बाज़ार में आपकी कीमत")}</h2>
-        <div class="panel-sub">${T(`Prices of ${r.market.n_comparable} comparable live listings`, `${r.market.n_comparable} मिलती-जुलती लिस्टिंग की कीमतें`)}</div></div></div>
+        <div class="panel-sub">${T(`${m.n_comparable} similar listings`, `${m.n_comparable} मिलती-जुलती लिस्टिंग`)}</div></div></div>
       <div id="chart-dist"></div>
       <div class="legend">
         <span><i style="background:var(--series-1)"></i>${T("Listings", "लिस्टिंग")}</span>
@@ -335,7 +373,7 @@ function render() {
     </div>
     <div class="panel chart">
       <div class="panel-head"><div><h2>${T("Profit at every price", "हर कीमत पर मुनाफ़ा")}</h2>
-        <div class="panel-sub">${windowText(rec, L).chart}${rec.stock_limited ? T(`, ${rec.inventory} pieces`, `, ${rec.inventory} पीस`) : ""}. ${T("Hover the line.", "")}</div></div></div>
+        <div class="panel-sub">${windowText(rec, L).chart}${rec.stock_limited ? T(`, ${rec.inventory} pieces`, `, ${rec.inventory} पीस`) : ""}</div></div></div>
       <div id="chart-curve"></div>
       <div class="legend">
         <span><i style="background:var(--series-1)"></i>${T("Total profit", "कुल मुनाफ़ा")}</span>
@@ -344,41 +382,19 @@ function render() {
     </div>
   </div>
 
-  <div class="row2">
-    <div class="panel">
-      <div class="panel-head"><div><h2>${T("Compare goals", "लक्ष्यों की तुलना")}</h2>
-        <div class="panel-sub">${windowText(rec, L).table}</div></div></div>
-      <div class="table-wrap"><table>
-        <thead><tr><th>${T("Goal", "लक्ष्य")}</th><th class="num">${T("Price", "कीमत")}</th><th class="num">${T("Orders/day", "ऑर्डर/दिन")}</th><th class="num">${T("Per order", "प्रति ऑर्डर")}</th><th class="num">${T("Profit", "मुनाफ़ा")}</th></tr></thead>
-        <tbody>${Object.entries(r.modes).map(([k, m]) => `
-          <tr class="${k === rec.mode ? "chosen" : ""}"><td>${esc(m.label)}</td><td class="num">${inr(m.price)}</td>
-          <td class="num">${num(m.orders_per_day, 1)}</td><td class="num ${m.profit_per_order < 0 ? "neg" : ""}">${inr(m.profit_per_order)}</td>
-          <td class="num ${m.total_profit < 0 ? "neg" : ""}">${inr(m.total_profit)}</td></tr>`).join("")}
-        </tbody></table></div>
-    </div>
-    <div class="panel">
-      <div class="panel-head"><div><h2>${T("Where the money goes", "पैसा कहाँ जाता है")}</h2>
-        <div class="panel-sub">${T(`Per order at ${inr(rec.entry_price)}, averaged over returns`, `₹${rec.entry_price} पर प्रति ऑर्डर`)}</div></div></div>
-      <table><tbody>${r.economics.breakdown.map(l => `
-        <tr class="${l.total ? "total" : ""}"><td>${esc(l.label)}</td><td class="num ${l.amount < 0 ? "neg" : (l.total ? "pos" : "")}">${inr(l.amount, 1)}</td></tr>`).join("")}
-      </tbody></table>
-      <p class="muted small" style="margin:12px 0 0">${r.economics.kept_share_pct}% of orders are kept by buyers. Shipping and packaging rates are assumptions.</p>
-    </div>
-  </div>
-
-  ${tips.length ? `<div class="panel"><div class="panel-head"><h2>${T("To sell more", "बेहतर बिक्री के लिए")}</h2></div><div class="notes">${tips.map(noteRow).join("")}</div></div>` : ""}
+  ${ex.tips.length ? `<div class="panel"><div class="panel-head"><h2>${icon("spark", "i h")}${T("To sell more", "बेहतर बिक्री के लिए")}</h2></div>
+    <div class="tips-grid">${ex.tips.map(t => `<div class="tip-card">${icon("spark")}<span>${esc(tr(t))}</span></div>`).join("")}</div></div>` : ""}
 
   <div class="panel">
-    <div class="panel-head"><h2>${T("Closest competing listings", "सबसे करीबी प्रतिस्पर्धी")}</h2></div>
-    <div class="table-wrap"><table>
-      <thead><tr><th>${T("Listing", "लिस्टिंग")}</th><th>${T("Seller", "विक्रेता")}</th><th class="num">${T("Price", "कीमत")}</th><th class="num">${T("Rating", "रेटिंग")}</th><th class="num">${T("Orders/mo", "ऑर्डर/माह")}</th><th class="num">${T("Returns", "रिटर्न")}</th><th class="num">${T("Match", "मेल")}</th></tr></thead>
-      <tbody>${r.market.top_competitors.map(c => `
-        <tr><td>${esc(c.title)}</td><td>${esc(c.seller)}${c.is_demo_seller ? `<span class="tag">demo</span>` : ""}<div class="sub-line">${esc(c.city)}</div></td>
-        <td class="num">${inr(c.price)}<div class="sub-line"><s>${inr(c.mrp)}</s></div></td>
-        <td class="num">${c.rating ? "★ " + Number(c.rating).toFixed(1) : "–"}<div class="sub-line">${num(c.reviews, 0)}</div></td>
-        <td class="num">${num(c.est_monthly_orders, 0)}</td><td class="num">${c.return_rate_pct === null ? "–" : c.return_rate_pct + "%"}</td>
-        <td class="num">${c.similarity_pct}%</td></tr>`).join("")}
-      </tbody></table></div>
+    <div class="panel-head"><h2>${icon("users", "i h")}${T("Closest competing listings", "सबसे करीबी प्रतिस्पर्धी")}</h2></div>
+    <div class="comp-grid">${m.top_competitors.map(c => `
+      <div class="comp-card">${thumb(colorFromTitle(c.title) || "grey", c.title, "md")}
+        <div class="comp-body"><div class="comp-title">${esc(c.title)}</div>
+          <div class="comp-seller">${esc(c.seller)}${c.is_demo_seller ? `<span class="tag">demo</span>` : ""} · ${esc(c.city)}</div>
+          <div class="comp-price">${inr(c.price)} <s>${inr(c.mrp)}</s></div>
+          <div class="comp-stats"><span>${icon("star", "i sm")}${c.rating ? Number(c.rating).toFixed(1) : "–"}</span><span>${icon("cart", "i sm")}${num(c.est_monthly_orders, 0)}/mo</span>
+            <span>${icon("return", "i sm")}${c.return_rate_pct === null ? "–" : c.return_rate_pct + "%"}</span><span class="match">${c.similarity_pct}% match</span></div></div></div>`).join("")}
+    </div>
   </div>
 
   <div class="panel">
@@ -389,12 +405,22 @@ function render() {
   </div>`;
 
   $$(".lang button", out).forEach(b => b.addEventListener("click", () => { state.lang = b.dataset.lang; render(); }));
+  bindMore(out);
   const lb = $("#list-btn", out);
   if (lb) lb.addEventListener("click", listProduct);
   const gl = $("#go-listings", out);
   if (gl) gl.addEventListener("click", e => { e.preventDefault(); state.lSeller = String(state.listed.seller_id); switchTab("listings"); window.scrollTo(0, 0); });
   drawDistribution($("#chart-dist"), r);
   drawCurve($("#chart-curve"), r);
+}
+
+function bindMore(root) {
+  $$(".more-btn", root).forEach(b => b.addEventListener("click", () => {
+    const more = b.previousElementSibling;
+    const open = more.hidden;
+    more.hidden = !open;
+    b.textContent = open ? "Less" : "More";
+  }));
 }
 
 // ------------------------------------------------------------------ AI explanations (template text is the fallback)
@@ -794,6 +820,8 @@ const SWATCH = { indigo: "#3f4a9a", maroon: "#7a1f2b", mustard: "#d4a017", white
   yellow: "#f2d33b", "sky blue": "#8cc8ec", peach: "#f6b99a", red: "#d33a3a", green: "#3f8f4f", grey: "#9a9aa0",
   gray: "#9a9aa0", black: "#222", wine: "#6e1f3a", teal: "#1f8a8a", pink: "#f07aa8", "navy blue": "#23305e",
   lavender: "#b9a6e0", rust: "#b7472a", olive: "#6b7a2f", cream: "#f4ead2", purple: "#6b3fa0", gold: "#c9a227", orange: "#f08a2c", magenta: "#c0288c", blue: "#3a6fd8", beige: "#e3d3b5", brown: "#7a5230" };
+const LIST_ICONS = { market: "store", funnel: "cart", eye: "eye", stock: "box", variant: "palette", festival: "spark", season: "cal",
+  old: "clock", bundle: "gift", star: "star", rival: "users", new: "rocket", plan: "cal", wait: "clock", cost: "shield" };
 const REASON_LABEL = { market: "Market", funnel: "Conversion", eye: "Clicks", stock: "Stock", variant: "Colours",
   festival: "Festivals", season: "Season", old: "Ageing stock", bundle: "Clearance", star: "Reviews", rival: "Rival",
   new: "New listing", plan: "Plan", wait: "Timing", cost: "Margin" };
@@ -802,10 +830,92 @@ const FILTERS = [["all", "All"], ["up", "Raise"], ["down", "Lower or clear"], ["
 function initListingsControls() {
   if ($("#l-seller").options.length) return;
   const sel = $("#l-seller");
-  sel.addEventListener("change", () => { state.lSeller = sel.value; state.lOpen.clear(); loadListings(); });
+  sel.addEventListener("change", () => { state.lSeller = sel.value; state.lOpen.clear(); loadListings(); if (state.lView === "sale") loadSale(); });
+  $$("#l-views .vt-btn").forEach(b => b.addEventListener("click", () => setListingsView(b.dataset.view)));
   $("#l-mode").innerHTML = state.meta.modes.map(m =>
     `<button data-mode="${esc(m.value)}" title="${esc(m.hint)}">${esc(m.label)}</button>`).join("");
   $$("#l-mode button").forEach(b => b.addEventListener("click", () => { state.lMode = b.dataset.mode; loadListings(); }));
+}
+
+function setListingsView(view) {
+  state.lView = view;
+  $$("#l-views .vt-btn").forEach(b => b.classList.toggle("active", b.dataset.view === view));
+  const sale = view === "sale";
+  $("#l-sale").hidden = !sale;
+  ["#l-summary", "#l-rivals", "#l-toast", "#l-filters", "#l-groups"].forEach(sel => { $(sel).hidden = sale; });
+  $("#l-mode").parentElement.hidden = sale;
+  if (sale) loadSale();
+}
+
+async function loadSale() {
+  const box = $("#l-sale");
+  box.innerHTML = `<div class="panel muted"><span class="spinner"></span>Planning the sale…</div>`;
+  try {
+    const ev = state.saleEvent ? `&event=${encodeURIComponent(state.saleEvent)}` : "";
+    state.saleData = await api(`/api/listings/sale?seller_id=${encodeURIComponent(state.lSeller)}${ev}`);
+    state.saleEvent = state.saleData.event.key;
+    renderSale();
+  } catch (e) {
+    box.innerHTML = `<div class="panel error">${esc(e.message)}</div>`;
+  }
+}
+
+function renderSale() {
+  const d = state.saleData, s = d.summary, ev = d.event;
+  const stat = (ic, v, k, sub, cls = "") => `<div class="stat"><div class="stat-ic">${icon(ic)}</div><div class="stat-v ${cls}">${v}</div><div class="stat-k">${k}</div>${sub ? `<div class="stat-sub">${sub}</div>` : ""}</div>`;
+  const evCard = e => `<button class="ev-card${e.key === ev.key ? " on" : ""}" data-ev="${esc(e.key)}">
+      <span class="ev-ic">${icon("sale")}</span><span class="ev-body"><b>${esc(e.name)}</b>
+      <span>${icon("cal", "i xs")}${esc(shortDate(e.start))} – ${esc(shortDate(e.end))} · ${e.days} days</span>
+      <span>${icon("users", "i xs")}${e.traffic}× traffic · ${icon("percent", "i xs")}min ${e.min_discount_pct}% off</span></span></button>`;
+  const dec = x => x.decision === "join" ? (x.stage === "Ageing" ? "old" : "up") : "hold";
+  $("#l-sale").innerHTML = `
+    <div class="panel">
+      <div class="panel-head"><div><h2>${icon("sale", "i h")}Pick a sale</h2><div class="panel-sub">Example events for this demo</div></div></div>
+      <div class="ev-row">${d.events.map(evCard).join("")}</div>
+    </div>
+    ${!d.items.length ? `<div class="panel empty-l"><h2>No live listings to plan</h2><p class="muted">List a kurti first.</p></div>` : `
+    <div class="panel summary-panel"><div class="stat-strip">
+      ${stat("tag", `${s.joining} / ${s.listings}`, "listings to join")}
+      ${stat("rupee", inr(s.sale_profit), "profit during sale", `${inr(s.profit_if_all_stay_out)} if you stay out`)}
+      ${stat("box", num(s.units_sold, 0), "pieces sold", s.ageing_units_cleared ? `${num(s.ageing_units_cleared, 0)} ageing cleared` : "")}
+      ${stat("wallet", inr(s.stock_value_freed), "stock value freed", "cash no longer stuck")}
+      ${stat("trend", `${s.net_gain >= 0 ? "+" : ""}${inr(s.net_gain)}`, "net gain vs staying out", "profit + stock freed", s.net_gain >= 0 ? "good-t" : "bad-t")}
+    </div></div>
+    <div class="sale-list">${d.items.map(x => saleCard(x, ev, dec(x))).join("")}</div>
+    <p class="muted small" style="margin:6px 0 0">${icon("info", "i xs")} Prices go back to normal after the sale. No restocking is assumed during a short sale.</p>`}`;
+  $$("#l-sale .ev-card").forEach(b => b.addEventListener("click", () => { state.saleEvent = b.dataset.ev; loadSale(); }));
+  bindMore($("#l-sale"));
+}
+
+function saleCard(x, ev, cls) {
+  const r = x.recommended, k = x.skip;
+  const join = x.decision === "join";
+  const opts = [{ ...k, discount_pct: 0, stay: true }, ...x.options];
+  const maxAbs = Math.max(1, ...opts.map(o => Math.abs(o.net)));
+  const W = 260, H = 70, mid = H / 2, bw = W / opts.length;
+  const bars = opts.map((o, i) => {
+    const h = Math.max(1, Math.abs(o.net) / maxAbs * (mid - 6));
+    const y = o.net >= 0 ? mid - h : mid;
+    const best = (join && o.price === r.price) || (!join && o.stay);
+    const col = best ? "var(--accent)" : (o.stay ? "#b9b7b0" : (o.allowed === false ? "#e7e6e2" : "var(--series-1)"));
+    return `<rect x="${(i * bw + 3).toFixed(1)}" y="${y.toFixed(1)}" width="${(bw - 6).toFixed(1)}" height="${h.toFixed(1)}" rx="2" fill="${col}"><title>${o.stay ? "Stay out" : o.discount_pct + "% off"}: ${inr(o.price)} · ${o.orders} orders · net ${inr(o.net)}</title></rect>
+      <text x="${(i * bw + bw / 2).toFixed(1)}" y="${H + 12}" text-anchor="middle">${o.stay ? "Out" : o.discount_pct + "%"}</text>`;
+  }).join("");
+  return `<div class="panel sale-card ${cls}">
+    <div class="sc-head">${thumb(x.color, x.title, "md")}
+      <div class="sc-name"><b>${esc(x.color)}</b><span>${esc(x.design)}</span>${x.stage === "Ageing" ? `<span class="stage-chip old">${icon("clock", "i xs")}Ageing</span>` : ""}</div>
+      <span class="act ${cls}">${icon(join ? (x.stage === "Ageing" ? "clock" : "sale") : "flat", "i xs")}${esc(x.label)}</span></div>
+    <div class="sc-price">${join ? `<s>${inr(x.current_price)}</s> <b>${inr(r.price)}</b> <span class="off">−${r.discount_pct}%</span>` : `<b>${inr(x.current_price)}</b> <span class="muted small">keep price</span>`}</div>
+    <div class="sc-stats">
+      <span title="Orders during the sale">${icon("cart", "i sm")}<b>${num(r.orders, 0)}</b> <small>vs ${num(k.orders, 0)} out</small></span>
+      <span title="Profit during the sale">${icon("rupee", "i sm")}<b class="${r.profit < 0 ? "bad-t" : ""}">${inr(r.profit)}</b> <small>${inr(r.profit_per_order)}/order</small></span>
+      <span title="Stock left after the sale">${icon("box", "i sm")}<b>${num(r.stock_left, 0)}</b> <small>left${r.sells_out_day ? ` · out day ${num(r.sells_out_day, 0)}` : ""}</small></span>
+    </div>
+    <div class="sc-cap">Net result by discount <span>profit + stock freed · pink = best</span></div>
+    <svg class="sc-chart" viewBox="0 -2 ${W} ${H + 16}" role="img" aria-label="Net result at each discount">
+      <line x1="0" x2="${W}" y1="${mid}" y2="${mid}" stroke="var(--line-strong)"/>${bars}</svg>
+    <div class="sc-why">${esc(firstSentence(x.reason.split(". ").slice(1).join(". ")) || firstSentence(x.reason))}<span class="ledger-more" hidden> ${esc(x.reason)}</span> <button class="more-btn" type="button">More</button></div>
+  </div>`;
 }
 
 async function loadListings() {
@@ -849,17 +959,16 @@ function renderListings() {
     return;
   }
   const upl = s.profit_uplift;
-  const stat = (v, k, sub, cls = "") => `<div class="stat"><div class="stat-v ${cls}">${v}</div><div class="stat-k">${k}</div>${sub ? `<div class="stat-sub">${sub}</div>` : ""}</div>`;
+  const stat = (v, k, sub, cls = "", ic = "info") => `<div class="stat"><div class="stat-ic">${icon(ic)}</div><div class="stat-v ${cls}">${v}</div><div class="stat-k">${k}</div>${sub ? `<div class="stat-sub">${sub}</div>` : ""}</div>`;
   $("#l-summary").innerHTML = `<div class="panel summary-panel">
     <div class="stat-strip six">
-      ${stat(s.listings, "live listings", `${s.designs} designs`)}
-      ${stat(num(s.stock_units, 0), "units in stock", `${inr(s.stock_value)} at cost`)}
-      ${stat(num(s.orders_30d, 0), "orders, last 30 days", `${inr(s.revenue_30d)} in sales`)}
-      ${stat(num(s.ageing_units, 0), "units of ageing stock", s.ageing_units ? "to clear" : "none")}
-      ${stat(s.changes, "price changes suggested", `goal: ${esc(d.mode_label)}`)}
-      ${stat(`${upl >= 0 ? "+" : ""}${inr(upl)}`, "net profit, next 30 days", `${inr(s.profit_next_30d_now)} → ${inr(s.profit_next_30d_recommended)}`, upl >= 0 ? "good-t" : "bad-t")}
+      ${stat(s.listings, "live listings", `${s.designs} designs`, "", "shirt")}
+      ${stat(num(s.stock_units, 0), "units in stock", `${inr(s.stock_value)} at cost`, "", "box")}
+      ${stat(num(s.orders_30d, 0), "orders, 30 days", `${inr(s.revenue_30d)} sales`, "", "cart")}
+      ${stat(num(s.ageing_units, 0), "ageing units", s.ageing_units ? "to clear" : "none", s.ageing_units ? "bad-t" : "", "clock")}
+      ${stat(s.changes, "price changes", esc(d.mode_label), "", "tag")}
+      ${stat(`${upl >= 0 ? "+" : ""}${inr(upl)}`, "extra net profit, 30 days", `${inr(s.profit_next_30d_now)} → ${inr(s.profit_next_30d_recommended)}`, upl >= 0 ? "good-t" : "bad-t", "trend")}
     </div>
-    <p class="summary-foot">Net profit is expected sales profit minus the value lost on stock that ages unsold. Data as of ${esc(d.as_of)}; forecasts cover the next ${d.horizon_days} days.</p>
   </div>`;
   $("#l-rivals").innerHTML = rivalsCard(d);
   const all = d.groups.flatMap(g => g.variants);
@@ -879,6 +988,7 @@ function renderListings() {
   $$("#l-groups .delist").forEach(b => b.addEventListener("click", () => { state.confirmDelist = Number(b.dataset.pid); renderListings(); }));
   $$("#l-groups .delist-cancel").forEach(b => b.addEventListener("click", () => { state.confirmDelist = null; renderListings(); }));
   $$("#l-groups .delist-yes").forEach(b => b.addEventListener("click", () => delist(Number(b.dataset.pid), b)));
+  bindMore($("#l-groups"));
   renderToast();
   for (const id of state.lOpen) {
     const v = all.find(x => x.product_id === id);
@@ -934,10 +1044,9 @@ function rivalsCard(d) {
   const rs = d.rivals.filter(r => r.overlapping > 0);
   const others = d.rivals.filter(r => r.overlapping === 0);
   return `<div class="panel">
-    <div class="panel-head"><div><h2>Sellers competing with you</h2>
-      <div class="panel-sub">Other sellers on this demo whose kurtis are close to yours</div></div></div>
+    <div class="panel-head"><div><h2>${icon("users", "i h")}Sellers competing with you</h2></div></div>
     ${rs.length ? `<div class="rival-rows">${rs.map(r => `<div class="rival-row">
-        <div class="who"><b>${esc(r.name)}</b><span>${esc(r.city)} · ${esc(r.tier)} seller</span></div>
+        <div class="who"><span class="avatar">${esc(r.name.split(/\s+/).map(w => w[0]).join("").slice(0, 2).toUpperCase())}</span><div><b>${esc(r.name)}</b><span>${esc(r.city)} · ${esc(r.tier)} seller</span></div></div>
         <div>${r.overlapping} of their ${r.listings} listings compete with yours
           <div class="best">Best seller: ${esc(r.top_listing.title)}, ${inr(r.top_listing.price)}, ${num(r.top_listing.orders_per_day, 1)} orders/day</div></div>
         <div class="fig">avg ${inr(r.avg_price_overlap)}<div class="vs">${num(r.orders_per_day_overlap, 1)} orders/day</div></div>
@@ -953,10 +1062,10 @@ function groupCard(g) {
   const up = g.profit_uplift_30d;
   return `<div class="panel group">
     <div class="g-head">
-      <div><h3>${esc(g.name)}</h3><div class="g-meta">${esc(a.product_type)} · ${esc(a.fabric)} · ${esc(a.pattern)} · ${esc(a.occasion)}${multi ? ` · ${g.variants.length} colours` : ""}</div></div>
+      <div class="g-title">${g.variants.slice(0, 3).map(v => thumb(v.color, a.pattern, "sm")).join("")}<div><h3>${esc(g.name)}</h3><div class="g-meta">${esc(a.product_type)} · ${esc(a.fabric)} · ${esc(a.pattern)} · ${esc(a.occasion)}${multi ? ` · ${g.variants.length} colours` : ""}</div></div></div>
       <div class="g-uplift"><div class="v ${up > 0 ? "good-t" : (up < 0 ? "bad-t" : "")}">${up > 0 ? "+" : ""}${inr(up)}</div><div class="k">net profit, 30 days</div></div>
     </div>
-    ${g.has_variant_play ? `<div class="variant-note">Colours are priced together. The colour that sells out goes up, which moves some buyers to the slower colour and helps clear it.</div>` : ""}
+    ${g.has_variant_play ? `<div class="variant-note">${icon("palette", "i sm")} Colours priced together: the fast colour goes up, buyers shift to the slow one.</div>` : ""}
     <div class="table-wrap"><table class="vt">
       <thead><tr><th>Colour</th><th class="num">Stock</th><th class="num">Orders/day</th><th class="num">Click-through</th><th class="num">Conversion</th>
         <th class="num">Rating</th><th class="num">Price now</th><th class="num">Recommended</th></tr></thead>
@@ -973,21 +1082,24 @@ function cmp(val, seg, unit = "%") {
 
 function variantRows(v) {
   const open = state.lOpen.has(v.product_id);
-  const sw = SWATCH[(v.color || "").toLowerCase()] || "#c9c9cf";
-  const trend = v.trend_pct === null ? "" : `<div class="vs ${v.trend_pct > 5 ? "good-t" : (v.trend_pct < -5 ? "bad-t" : "")}">${v.trend_pct > 0 ? "+" : ""}${v.trend_pct}% vs last month</div>`;
+  const trend = v.trend_pct === null ? "" : `<div class="vs ${v.trend_pct > 5 ? "good-t" : (v.trend_pct < -5 ? "bad-t" : "")}">${icon(v.trend_pct > 5 ? "up" : v.trend_pct < -5 ? "down" : "flat", "i xs")}${Math.abs(v.trend_pct)}%</div>`;
+  const cov = v.days_of_cover;
+  const barPct = cov == null ? 100 : Math.max(4, Math.min(100, cov / 90 * 100));
+  const barCol = cov == null ? "var(--line-strong)" : cov < 10 ? "var(--bad)" : cov > 90 ? "#d99a1c" : "var(--good)";
+  const ACT_ICON = { up: "up", down: "down", old: "clock", hold: "flat", new: "rocket" };
   const changed = v.recommended_price !== v.current_price;
   const cover = v.days_of_cover === null ? "new" : (v.days_of_cover >= 999 ? "999+ days" : `${num(v.days_of_cover, 0)} days`);
   const row = `<tr class="vrow${open ? " open" : ""}" data-pid="${v.product_id}" aria-expanded="${open}">
-    <td><span class="swatch" style="background:${sw}"></span><b>${esc(v.color)}</b><span class="stage">${esc(v.stage)}</span>
-      <div class="expand">${open ? "Hide details" : "Why this price"}</div></td>
-    <td class="num">${num(v.stock, 0)}<div class="vs">${cover}</div></td>
+    <td><div class="v-cell">${thumb(v.color, v.title, "sm")}<div><b>${esc(v.color)}</b><span class="stage">${esc(v.stage)}</span>
+      <div class="expand">${icon("chevron", "i xs")}${open ? "Hide" : "Why"}</div></div></div></td>
+    <td class="num">${num(v.stock, 0)}<div class="minibar"><i style="width:${barPct}%;background:${barCol}"></i></div><div class="vs">${cover}</div></td>
     <td class="num">${num(v.orders_per_day_28d, 1)}${trend}</td>
     <td class="num">${cmp(v.ctr_pct, v.segment_ctr_pct)}</td>
     <td class="num">${cmp(v.cvr_pct, v.segment_cvr_pct)}</td>
     <td class="num">${v.rating ? `★ ${Number(v.rating).toFixed(1)}` : "–"}<div class="vs">${num(v.reviews, 0)} reviews</div></td>
     <td class="num">${inr(v.current_price)}</td>
     <td class="num"><span class="newprice">${inr(v.recommended_price)}</span>${changed ? ` <span class="vs">${v.change_pct > 0 ? "+" : ""}${num(v.change_pct, 1)}%</span>` : ""}
-      <div style="margin-top:4px"><span class="act ${esc(v.action)}">${esc(v.action_label)}</span></div></td>
+      <div style="margin-top:4px"><span class="act ${esc(v.action)}">${icon(ACT_ICON[v.action] || "flat", "i xs")}${esc(v.action_label)}</span></div></td>
   </tr>`;
   return row + (open ? detailRow(v) : "");
 }
@@ -1010,7 +1122,7 @@ function detailRow(v) {
     <div>
       <div class="why-head"><h4>${changed ? `Why ${inr(v.recommended_price)}` : `Why hold at ${inr(v.current_price)}`}</h4>${badge}</div>
       ${ai.status === "ai" ? `<p class="ai-summary">${esc(ai.summary)}</p>` : ""}
-      <ul class="why">${v.reasons.map((r, i) => `<li><span class="why-k ${esc(r.tone)}">${esc(REASON_LABEL[r.icon] || "Note")}</span><span>${esc(texts[i])}</span></li>`).join("")}</ul>
+      <div class="ledger compact">${v.reasons.map((r, i) => reasonRow(LIST_ICONS[r.icon] || "info", r.tone, REASON_LABEL[r.icon] || "Note", texts[i], "")).join("")}</div>
       ${v.target_price && v.target_price > v.recommended_price ? `<div class="target">The model sees room up to <b>${inr(v.target_price)}</b>. Raise in steps of up to 10% and check again after about 14 days, because a big jump can cost search ranking.</div>` : ""}
     </div>
     <div>

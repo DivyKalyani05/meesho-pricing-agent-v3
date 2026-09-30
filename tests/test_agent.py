@@ -23,6 +23,7 @@ from pricing_agent.explain import inr  # noqa: E402
 from pricing_agent.llm import LLMClient, LLMError  # noqa: E402
 from pricing_agent.narrator import Narrator, check_numbers  # noqa: E402
 from pricing_agent.repricer import Repricer  # noqa: E402
+from pricing_agent import sales  # noqa: E402
 from pricing_agent.server import serve  # noqa: E402
 
 TMP = tempfile.mkdtemp(prefix="kurti-test-")
@@ -31,12 +32,12 @@ AGENT = None
 
 EXAMPLES = [
     dict(seller_id=1, title="Jaipuri Cotton Hand Block Print Kurti",
-         description="Pure cotton, 3/4 sleeve, knee length, daily wear", cogs=150, inventory=200, n_photos=5),
+         description="Pure cotton, 3/4 sleeve, knee length, daily wear", cogs=210, inventory=200, n_photos=5),
     dict(seller_id=3, title="Banarasi Silk Kurta Set with Dupatta",
-         description="Festive silk blend with zari embroidery, full sleeve, calf length", cogs=420, inventory=80,
+         description="Festive silk blend with zari embroidery, full sleeve, calf length", cogs=520, inventory=80,
          offline_price=1299, offline_margin_pct=45, n_photos=6),
     dict(seller_id=2, title="Rayon Printed Kurti with Palazzo", description="office wear, 3/4 sleeve",
-         cogs=180, inventory=120, expiry_date="2026-11-15", limited_stock=True, n_photos=3),
+         cogs=240, inventory=120, expiry_date="2026-11-15", limited_stock=True, n_photos=3),
 ]
 
 
@@ -104,11 +105,22 @@ class TestModel(unittest.TestCase):
         self.assertGreater(AGENT.market.fair_price(richer), 1.8 * AGENT.market.fair_price(base))
 
     def test_economics(self):
-        eco = Economics(cogs=150, ret=0.18, rto=0.11, packaging=7, fwd=62, rev=78)
+        eco = Economics(cogs=150, ret=0.18, rto=0.11, packaging=7, fwd=62, rev=78, transit=0.008)
         self.assertAlmostEqual(eco.profit(eco.break_even()), 0, places=6)
         self.assertGreater(eco.profit(400), eco.profit(300))
         bd = eco.breakdown(349)
         self.assertAlmostEqual(sum(l["amount"] for l in bd[:-1]), bd[-1]["amount"], delta=0.5)
+
+    def test_meesho_fee_rules(self):
+        """Kept orders: no shipping. Returns: both legs. RTO: nothing. Transit: lost pieces."""
+        base = dict(cogs=200, ret=0.2, rto=0.1, packaging=10, fwd=60, rev=80)
+        eco = Economics(**base)
+        self.assertAlmostEqual(eco.shipping_cost, 0.2 * (60 + 80))
+        self.assertAlmostEqual(Economics(**dict(base, rto=0.3)).shipping_cost, eco.shipping_cost)   # RTO costs nothing
+        with_loss = Economics(**base, transit=0.01)
+        self.assertAlmostEqual(with_loss.transit_cost, 200 * 0.01 * (1 + 0.2 + 0.1))
+        self.assertGreater(with_loss.break_even(), eco.break_even())
+        self.assertEqual({k: config.TRANSIT_LOSS[k] > 0 for k in config.PRODUCT_TYPES}, {k: True for k in config.PRODUCT_TYPES})
 
 
 class TestRecommendations(unittest.TestCase):
@@ -278,6 +290,47 @@ class TestListings(unittest.TestCase):
             self.rp.seller_listings(999)
         with self.assertRaises(InputError):
             self.rp.seller_listings(1, "nope")
+
+
+class TestSalePlanner(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.rp = Repricer(AGENT)
+        cls.plans = {(sid, e["key"]): sales.plan(cls.rp, sid, e["key"]) for sid in (1, 2) for e in config.SALE_EVENTS}
+
+    def test_every_listing_gets_a_decision(self):
+        for (sid, ev), d in self.plans.items():
+            event = next(e for e in config.SALE_EVENTS if e["key"] == ev)
+            self.assertEqual(len(d["items"]), d["summary"]["listings"])
+            for x in d["items"]:
+                self.assertIn(x["decision"], ("join", "skip"))
+                self.assertTrue(x["reason"])
+                r = x["recommended"]
+                if x["decision"] == "join":
+                    self.assertGreaterEqual(r["discount_pct"], round(100 * event["min_discount"]))
+                    self.assertLessEqual(r["discount_pct"], 41)
+                    self.assertEqual(r["price"] % 10, 9)
+                    self.assertGreaterEqual(r["net"], x["skip"]["net"])     # joining only when it pays
+                else:
+                    self.assertEqual(r["price"], x["current_price"])
+                self.assertLessEqual(r["units"], x["stock"] + 1)          # never sells stock it doesn't have
+                json.dumps(x, allow_nan=False)
+
+    def test_low_stock_stays_out_and_ageing_joins(self):
+        d = self.plans[(1, "diwali_mega")]
+        indigo = next(x for x in d["items"] if x["title"].startswith("Indigo Dabu"))
+        self.assertEqual(indigo["decision"], "skip")
+        ageing = [x for x in d["items"] if x["stage"] == "Ageing"]
+        self.assertTrue(ageing and all(x["decision"] == "join" for x in ageing))
+
+    def test_bigger_sale_sells_more(self):
+        a = self.plans[(2, "navratri_flash")]["summary"]["units_sold"]
+        b = self.plans[(2, "diwali_mega")]["summary"]["units_sold"]
+        self.assertGreater(b, a)
+
+    def test_bad_event(self):
+        with self.assertRaises(InputError):
+            sales.plan(self.rp, 1, "nope")
 
 
 class FakeLLM(LLMClient):
@@ -470,6 +523,13 @@ class TestServer(unittest.TestCase):
         self.assertEqual(json.loads(b)["source"], "template")
         s, b = self.req("/api/narrate/listing", {"product_id": 1000})
         self.assertIn(json.loads(b)["source"], ("template", "ai"))
+
+    def test_sale_endpoint(self):
+        s, b = self.req("/api/listings/sale?seller_id=1&event=diwali_mega")
+        d = json.loads(b)
+        self.assertEqual((s, d["event"]["key"], len(d["events"])), (200, "diwali_mega", 2))
+        self.assertEqual(self.req("/api/listings/sale?seller_id=1&event=bad")[0], 400)
+        self.assertEqual(json.loads(self.req("/api/listings/sale?seller_id=1")[1])["event"]["key"], "navratri_flash")
 
     def test_head_and_odd_requests(self):
         r = urllib.request.Request(f"http://127.0.0.1:{self.port}/api/health", method="HEAD")

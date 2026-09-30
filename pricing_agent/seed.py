@@ -26,7 +26,7 @@ N_COMPETITOR_SELLERS = 260
 # Ground-truth price sensitivity by occasion (the engine never reads these).
 TRUE_SENSITIVITY = {"daily": 3.6, "office": 3.2, "festive": 2.6, "party": 2.8}
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 # Demo sellers with hand-designed catalogues. Each variant = (colour, popularity, units in stock).
 # Rangreza and Sanganeri compete head-on in Jaipur cotton; Surat Silk Mart and Lucknow Chikan Studio
@@ -218,14 +218,15 @@ def build(db_path: str = DB_PATH, verbose: bool = True) -> str:
     days = [window_start + timedelta(days=i) for i in range(config.HISTORY_DAYS)]
 
     # --- reference tables
-    con.execute("INSERT INTO categories VALUES (1, NULL, 1, 'Women Ethnic', NULL, 0.05, NULL, NULL)")
-    con.execute("INSERT INTO categories VALUES (2, 1, 2, 'Kurtis & Kurta Sets', NULL, 0.05, NULL, NULL)")
+    con.execute("INSERT INTO categories VALUES (1, NULL, 1, 'Women Ethnic', NULL, 0.05, NULL, NULL, NULL)")
+    con.execute("INSERT INTO categories VALUES (2, 1, 2, 'Kurtis & Kurta Sets', NULL, 0.05, NULL, NULL, NULL)")
     cat_id = {}
     for i, (key, (name, _, _)) in enumerate(config.PRODUCT_TYPES.items()):
         cid = 10 + i
         cat_id[key] = cid
         ret, rto = config.CATEGORY_RETURN_PRIORS[key]
-        con.execute("INSERT INTO categories VALUES (?,?,?,?,?,?,?,?)", (cid, 2, 3, name, key, config.GST_RATE, ret, rto))
+        con.execute("INSERT INTO categories VALUES (?,?,?,?,?,?,?,?,?)",
+                    (cid, 2, 3, name, key, config.GST_RATE, ret, rto, config.TRANSIT_LOSS[key]))
     con.executemany("INSERT INTO shipping_rate_card VALUES (?,?,?)", config.SHIPPING_SLABS)
     con.executemany("INSERT INTO packaging_rate_card VALUES (?,?,?,?)",
                     [(k, v[0], v[1], v[2]) for k, v in config.PACKAGING.items()])
@@ -275,7 +276,7 @@ def build(db_path: str = DB_PATH, verbose: bool = True) -> str:
         counters["pid"] += 1
         weight, pkg = package_for(ptype, fabric)
         fp = fair_price(ptype, fabric, pattern)
-        cogs_true = fp * rng.uniform(0.40, 0.48)
+        cogs_true = fp * rng.uniform(0.58, 0.66)   # sellers pay no delivery on kept orders, so making cost is ~60% of price
         final_price = price_ending_9(fp * rel_pos)
         sizes = rng.choice(["S,M,L,XL,XXL", "M,L,XL,XXL", "S,M,L,XL,XXL,3XL", "Free Size"])
         title = f"{color} {name}" if name else make_title(fabric, pattern, ptype, color, occasion)

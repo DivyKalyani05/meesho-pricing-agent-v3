@@ -28,7 +28,7 @@ This opens http://127.0.0.1:8000. On first run it generates the database in abou
 
 - `python3 run.py --rebuild` regenerates the marketplace data and clears saved recommendations.
 - `python3 run.py --port 9000 --no-browser`
-- `python3 -m unittest -v` runs 40 end-to-end tests: data integrity, model recovery, pricing logic,
+- `python3 -m unittest -v` runs 46 end-to-end tests: data integrity, model recovery, pricing logic,
   repricing guard rails, the list → reprice → apply → delist flow, AI-text checks (with a fake model), the data browser, the HTTP API and a 150-case fuzz test.
 - The database rebuilds automatically when the schema changes. `--rebuild` also wipes any listings
   and price changes made during a demo, so each demo starts clean.
@@ -51,26 +51,30 @@ when one is busy or out of quota.
 
 ## 3-minute demo script
 
-1. **Jaipur cotton kurti** (established seller). The recommended price is ₹349, inside the market's
-   ₹319–₹389 middle band. The breakdown shows the ₹284 break-even, the seller's 26% better
-   click-through, and a ₹10 launch discount. The plan is to move to ₹359 after 20–25 reviews.
-2. **Festive silk set, new seller.** Navratri is 12 days away and Dussehra 21, and silk is in
-   season. Price goes up by +₹60 compared with a normal month (*why* is computed, not written by
-   hand). Switch to **हिंदी**. Then change the launch date to May 2027 and the price drops.
-3. **Clear stock before sell-by.** 120 pieces must go before 15 Nov. The agent picks the highest price
-   that still sells out in time.
-4. On any result, type colours (e.g. "Rust, Olive") and press **List**, then **View in My listings**. The
-   new listings appear with their launch plan and closest rival.
-5. **My listings → Rangreza Prints.** Walk through these rows:
+1. **Jaipur cotton kurti** (established seller, cost ₹210). The recommended price is **₹339**, right in the
+   market's ₹319–₹389 middle band, as the price ladder shows. Break-even is ₹271. The money bar shows where
+   each rupee goes: no delivery charge on kept orders, both-way shipping on returns, and a 0.6% transit loss.
+2. **Festive silk set, new seller.** Navratri is 12 days away and Dussehra 21, and silk is in season, so the
+   price goes up by **+₹50** (*why* is computed, not written by hand). Launch at ₹899, then ₹939 after
+   reviews. Switch to **हिंदी**. Then change the launch date to May 2027 and the price drops.
+3. **Clearance before sell-by.** 120 pieces must go before 15 Nov. **₹379** is the highest price that still
+   sells out in time (about 46 days).
+4. On any result, type colours (e.g. "Rust, Olive") and press **List**, then **Open My listings**. The new
+   listings appear with their launch plan and closest rival.
+5. **My listings → Price check → Rangreza Prints.** Walk through these rows:
    - *Dabu Block Print*: Indigo sells 5× faster than Maroon and has 2 days of stock. Indigo goes up;
      Maroon holds because the buyers Indigo loses switch to Maroon.
-   - *Summer Mulmul*: ageing cotton stock heading into winter is marked down 15–25%. The reasons explain
-     why cutting deeper would lose more than selling the leftovers in bulk.
-   - *Khadi Kurta Set*: 21% above fair price with weak conversion, so it comes down.
+   - *Summer Mulmul*: ageing cotton stock heading into winter is marked down about a third to clear it.
+   - *Khadi Kurta Set*: well above fair price with weak conversion, so it comes down.
    - Press **Apply** on a row and it moves to "Recently changed – wait" (it re-checks after 14 days).
-6. Switch goals (Balanced / Max Profit / Scale / Clear) and switch sellers. **Sanganeri Cotton Co.** and
-   **Rangreza** compete in Jaipur cotton and show up as each other's rivals.
-7. Open the **Marketplace data** tab to show the data model the agent runs on.
+6. **My listings → Sale planner.** Pick **Diwali Mega Sale** (3× traffic, min 15% off):
+   - Ageing Summer Mulmul colours **join at about 35% off**. Each piece sells at a small loss, but clearing
+     stock that would otherwise lose value nets far more than staying out.
+   - The overpriced Khadi set joins at 16% off and makes more profit than staying out.
+   - **Indigo (18 pieces left) stays out**, because it sells out at full price anyway.
+   - Each card's bar chart shows the net result at every discount; pink is the best.
+7. Switch goals and sellers. **Sanganeri Cotton Co.** and **Rangreza** compete in Jaipur cotton and show up as
+   each other's rivals. Open **Data** to browse the tables the agent runs on.
 
 ## How it works
 
@@ -89,12 +93,21 @@ seller input ─► understand product ─► market scan ─► demand model �
 | **Price sensitivity** | Learnt *within* listings that changed their own price, so popularity cancels out. Uses same-occasion listings, and is shrunk toward a prior when data is thin. It recovers the generator's hidden truth within about 5–15% | `market.py::fit_demand` |
 | Demand level | Cross-section of comparables, with season removed, adjusted for rating, photos (CTR learnt from data), seller CTR, and a new-listing factor (new listings sell about 27% less in month 1, learnt from data) | `market.py`, `engine.py` |
 | Season & festivals | Fabric × month index plus festival calendar ramps, weighted by occasion. Busier periods mean more buyers and lower price sensitivity | `signals.py`, `config.py` |
-| Unit economics | Per order placed: GST, COGS, packaging, forward/return shipping, RTO charges, damaged returns | `engine.py::Economics` |
+| Unit economics | Per order placed, on Meesho's rules: **no delivery charge on kept orders**, returns pay **both** shipping legs, **RTO costs nothing**, plus GST, product cost, packaging, damaged returns and **transit losses by category** (kurti 0.6%, 2-piece 0.8%, anarkali 0.9%, 3-piece set 1.1%) | `engine.py::Economics` |
 | Optimiser | Evaluates every "…9" price. Takes stock, restock ability and sell-by write-offs into account | `engine.py` |
 | Explanations | Each reason reruns the optimiser with one factor switched off. For example, "+₹150 from festivals" is a real, computed difference | `explain.py` |
 
 Every recommendation is saved in `pricing_recommendations` for audit, and later for learning from
 outcomes.
+
+### Sale planner (`sales.py`)
+
+For a sale event (two examples: Navratri Flash Sale, 4 days, 2× traffic, min 10% off; Diwali Mega Sale,
+6 days, 3× traffic, min 15% off), each live listing's own demand model gets the sale's traffic plus the
+sale badge if it joins, a little spill-over traffic if it stays out, and buyers who compare prices harder.
+Every discount from the minimum up to 40% is scored on **profit during the sale + value of stock freed**
+(which matters most for ageing stock), with no restocking mid-sale. The agent picks the best discount, or
+**stay out** when full price earns more or the stock sells out anyway.
 
 ### Repricing live listings (`repricer.py`)
 
@@ -114,8 +127,11 @@ outcomes.
   33k reviews, all generated by `seed.py` from an explicit demand model. It is realistic, but it isn't
   Meesho data. The 5 demo sellers have hand-designed catalogues, so every repricing situation appears
   at least once: hot/slow colours, ageing stock, stock-outs, and under- and over-priced items.
-- **Assumed rate cards.** Shipping slabs, RTO charge, packaging, 0% commission, 5% GST, festival dates
-  (approximate) and seasonality indices are all in `config.py`, one place to swap in the real numbers.
+- **Assumed rate cards.** Shipping slabs, packaging, transit-loss rates, 0% commission, 5% GST, sale events
+  (traffic, minimum discount), festival dates (approximate) and seasonality indices are all in `config.py`,
+  one place to swap in the real numbers.
+- **Seller costs.** Sellers pay no delivery on kept orders, so in this market a kurti's making cost is about 60% of
+  its price. The demo sellers and examples use costs on that basis.
 - **Photos.** Only the photo *count* is used today: CTR by photo count is learnt from the data. Package
   size and weight are estimated from type and fabric.
 
@@ -143,12 +159,13 @@ pricing_agent/
   features.py               attribute detection, package estimation
   engine.py                 validation, economics, optimiser, listing & price-change actions
   repricer.py               lifecycle repricing of live listings (variants, ageing stock, rivals)
+  sales.py                  sale planner: best discount per listing for a sale event, or stay out
   explain.py                plain-language reasons (English + Hindi)
   llm.py                    tiny Gemini / Groq client (standard library only)
   narrator.py               AI explanations with number checks and template fallback
   dbview.py                 Data tab: paged, searchable, sortable table browser + CSV export
   server.py                 JSON API + static files
-web/                        UI (vanilla JS, hand-drawn SVG charts, works offline)
+web/                        UI (vanilla JS; visuals.js = icons, kurti drawings, price ladder; works offline)
 tests/test_agent.py         end-to-end tests
 docs/DATA_MODEL.md          data model reference
 ```

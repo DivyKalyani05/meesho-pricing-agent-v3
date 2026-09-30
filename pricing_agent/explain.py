@@ -95,10 +95,10 @@ def build_explanation(res, cf, best, inp, eco, sc):
     reasons.append({
         "icon": "cost", "tone": "positive" if ppo > 0 else "negative", "effect": f"min ₹{be}",
         "title": _t("Your cost floor", "आपकी न्यूनतम कीमत"),
-        "text": _t(f"Your cost {inr(eco.cogs)} + shipping {inr(eco.fwd)} + packaging {inr(eco.packaging)} + GST + returns "
+        "text": _t(f"Your cost {inr(eco.cogs)} + packaging {inr(eco.packaging)} + GST + return shipping + transit losses "
                    f"means anything below ₹{be} loses money. At ₹{price} you keep about {inr(ppo)} on every order "
                    f"({inr(rec['profit_per_delivered_order'])} on every order the buyer keeps).",
-                   f"लागत {inr(eco.cogs)} + शिपिंग {inr(eco.fwd)} + पैकिंग {inr(eco.packaging)} + GST + रिटर्न जोड़कर, "
+                   f"लागत {inr(eco.cogs)} + पैकिंग {inr(eco.packaging)} + GST + रिटर्न शिपिंग + रास्ते का नुकसान जोड़कर, "
                    f"₹{be} से कम कीमत पर घाटा होगा। ₹{price} पर हर ऑर्डर पर लगभग {inr(ppo)} बचेंगे "
                    f"(जो ऑर्डर ग्राहक रखता है उस पर {inr(rec['profit_per_delivered_order'])})।"),
     })
@@ -216,18 +216,27 @@ def build_explanation(res, cf, best, inp, eco, sc):
                           else "कीमत थोड़ी ज़्यादा रखने की गुंजाइश है।")),
         })
 
-    # 7. returns ---------------------------------------------------------------
+    # 7. returns & transit ---------------------------------------------------
     econ = res["economics"]
-    ret_cost = eco.ret * eco.rev + eco.rto * config.RTO_CHARGE + eco.cogs * eco.ret * config.DAMAGED_RETURN_SHARE
-    lost_rev = (eco.ret + eco.rto) * price
+    ret_cost = eco.ret * (eco.fwd + eco.rev) + eco.cogs * eco.ret * config.DAMAGED_RETURN_SHARE
+    both = eco.fwd + eco.rev
     reasons.append({
-        "icon": "returns", "tone": "negative", "effect": f"{econ['return_rate_pct'] + econ['rto_rate_pct']:.0f}% come back",
+        "icon": "returns", "tone": "negative", "effect": f"{econ['return_rate_pct']:.0f}% returned",
         "title": _t("Returns are priced in", "रिटर्न का खर्च शामिल है"),
-        "text": _t(f"About {econ['return_rate_pct']}% of kurtis like this are returned and {econ['rto_rate_pct']}% are refused at "
-                   f"delivery (RTO). That costs you ~{inr(ret_cost)} per order in return shipping and damaged pieces - "
-                   f"already included in the price.",
-                   f"ऐसी कुर्तियों में लगभग {econ['return_rate_pct']}% रिटर्न होती हैं और {econ['rto_rate_pct']}% डिलीवरी पर "
-                   f"वापस आती हैं (RTO)। इससे हर ऑर्डर पर ~{inr(ret_cost)} खर्च होता है - यह कीमत में पहले से शामिल है।"),
+        "text": _t(f"About {econ['return_rate_pct']}% of kurtis like this are returned; each return costs you {inr(both)} in "
+                   f"shipping both ways. {econ['rto_rate_pct']}% are refused at the door (RTO), which costs you nothing. "
+                   f"On average that is ~{inr(ret_cost)} per order, already in the price.",
+                   f"ऐसी लगभग {econ['return_rate_pct']}% कुर्तियाँ रिटर्न होती हैं; हर रिटर्न पर दोनों तरफ़ की शिपिंग {inr(both)} "
+                   f"आपको देनी होती है। {econ['rto_rate_pct']}% डिलीवरी पर लौटती हैं (RTO), उसका कोई चार्ज नहीं। औसतन हर ऑर्डर पर "
+                   f"~{inr(ret_cost)}, जो कीमत में पहले से शामिल है।"),
+    })
+    reasons.append({
+        "icon": "transit", "tone": "negative", "effect": f"{econ['transit_loss_pct']}% lost",
+        "title": _t("Transit losses", "रास्ते में नुकसान"),
+        "text": _t(f"For this category about {econ['transit_loss_pct']}% of shipments are lost or damaged on the way. "
+                   f"That costs you ~{inr(eco.transit_cost)} per order in lost pieces, already in the price.",
+                   f"इस कैटेगरी में लगभग {econ['transit_loss_pct']}% शिपमेंट रास्ते में खो जाते हैं या खराब होते हैं। इससे हर ऑर्डर पर "
+                   f"~{inr(eco.transit_cost)} का नुकसान होता है, जो कीमत में पहले से शामिल है।"),
     })
 
     # 8. inventory / goal ------------------------------------------------------

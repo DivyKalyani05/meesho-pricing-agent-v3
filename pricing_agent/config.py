@@ -101,7 +101,15 @@ SHIPPING_SLABS = [               # (max packed grams, forward shipping Rs, rever
     (1500, 104, 120),
     (99999, 132, 150),
 ]
-RTO_CHARGE = 40                  # charge per undelivered (return-to-origin) order
+# Who pays shipping (Meesho rules):
+#   delivered & kept      -> seller pays no shipping
+#   customer return       -> seller pays BOTH legs (forward + reverse)
+#   RTO (not delivered)   -> seller pays nothing
+SELLER_PAYS_FORWARD_ON_KEPT = False
+RTO_CHARGE = 0
+# Share of shipments lost or damaged in transit, by category (seller loses the piece).
+# Multi-piece sets and flowing / embellished styles are handled more and get damaged more often.
+TRANSIT_LOSS = {"kurti": 0.006, "kurti_bottom": 0.008, "kurta_set_dupatta": 0.011, "anarkali": 0.009}
 PACKAGING = {                    # size class: (Rs per unit, packed weight add-on g, description)
     "S": (7, 40, "Small courier poly-bag (up to 26x32 cm)"),
     "M": (10, 60, "Medium poly-bag (32x40 cm) + tag"),
@@ -180,3 +188,18 @@ CATEGORY_RETURN_PRIORS = {
     "kurta_set_dupatta": (0.19, 0.10),
     "anarkali": (0.22, 0.12),
 }
+
+# ---------------------------------------------------------------------------
+# Example sale events for the Sale planner (illustrative - not official Meesho dates).
+#   traffic       site traffic vs a normal day
+#   min_discount  discount needed to join the sale and get the sale badge
+# ---------------------------------------------------------------------------
+SALE_EVENTS = [
+    {"key": "navratri_flash", "name": "Navratri Flash Sale", "start": date(2026, 10, 8), "days": 4,
+     "traffic": 2.0, "min_discount": 0.10},
+    {"key": "diwali_mega", "name": "Diwali Mega Sale", "start": date(2026, 10, 29), "days": 6,
+     "traffic": 3.0, "min_discount": 0.15},
+]
+SALE_BADGE_UPLIFT = 1.25        # sale badge + sale-page placement for listings that join
+SALE_SPILLOVER = 1.15           # extra traffic that still reaches listings that stay out
+SALE_DEAL_SENSITIVITY = 1.3     # sale shoppers compare prices harder

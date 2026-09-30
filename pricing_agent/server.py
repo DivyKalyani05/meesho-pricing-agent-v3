@@ -7,10 +7,12 @@ import traceback
 from urllib.parse import parse_qs, urlparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+from . import config
 from .dbview import DBView
 from .engine import InputError, PricingAgent
 from .narrator import Narrator
 from .repricer import Repricer
+from . import sales
 
 mimetypes.add_type("image/webp", ".webp")   # not in every Linux mime table
 mimetypes.add_type("text/javascript", ".js")
@@ -71,6 +73,11 @@ class Handler(BaseHTTPRequestHandler):
                 with self.lock:
                     out = self.repricer.seller_listings((qs.get("seller_id") or [None])[0],
                                                         (qs.get("mode") or ["balanced"])[0])
+                return self._json(200, out)
+            if path == "/api/listings/sale":
+                qs = self._qs()
+                with self.lock:
+                    out = sales.plan(self.repricer, qs.get("seller_id"), qs.get("event") or config.SALE_EVENTS[0]["key"])
                 return self._json(200, out)
             if path == "/api/db":
                 return self._json(200, {"tables": self.agent.market.db_overview()})

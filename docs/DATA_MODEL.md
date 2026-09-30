@@ -20,7 +20,7 @@ reference: shipping_rate_card · packaging_rate_card · festival_calendar · fab
 
 | Group | Table | Grain | Used by the agent for |
 |---|---|---|---|
-| Catalogue | `categories` | one row per category node (L1 → L3) | GST, return/RTO priors |
+| Catalogue | `categories` | one row per category node (L1 → L3) | GST, return/RTO priors, transit-loss rate |
 | | `catalogs` | one design in several colours (a seller's upload batch) | colour variants are repriced together |
 | | `products` | one live listing (one colour of a design) | attributes → fair price, similarity, package size, MRP. `recommendation_id` links listings created by the agent to their launch plan |
 | | `inventory` | stock per listing | — (the seller's stock comes from the form) |

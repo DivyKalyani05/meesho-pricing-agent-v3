@@ -14,7 +14,8 @@ CREATE TABLE categories (
     product_type_key TEXT UNIQUE,                   -- leaf only, e.g. 'kurti'
     gst_rate         REAL NOT NULL DEFAULT 0.05,
     return_rate_prior REAL,                         -- customer returns
-    rto_rate_prior   REAL                           -- return-to-origin (COD refusals)
+    rto_rate_prior   REAL,                          -- return-to-origin (COD refusals)
+    transit_loss_rate REAL                          -- share of shipments lost / damaged in transit
 );
 
 -- ------------------------------------------------------------------ sellers

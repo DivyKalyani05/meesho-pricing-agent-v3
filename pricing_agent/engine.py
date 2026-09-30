@@ -135,16 +135,25 @@ def clean_input(raw: dict, market: Market) -> dict:
 # ---------------------------------------------------------------- economics
 @dataclass
 class Economics:
+    """
+    Expected money per order PLACED. Out of every order:
+      transit  lost / damaged on the way   -> no revenue, piece lost
+      ret      delivered then returned     -> no revenue, seller pays forward + reverse shipping
+      rto      refused at the door (RTO)   -> no revenue, no charges, piece comes back
+      kept     the rest                    -> revenue, no shipping charge to the seller
+    Return legs can also be lost in transit.
+    """
     cogs: float
     ret: float          # customer return rate
     rto: float          # return-to-origin rate
     packaging: float
     fwd: float
     rev: float
+    transit: float = 0.0
 
     @property
     def kept(self):
-        return 1.0 - self.ret - self.rto
+        return 1.0 - self.transit - self.ret - self.rto
 
     @property
     def gst_share(self):
@@ -155,14 +164,28 @@ class Economics:
         return self.kept * (1 - self.gst_share) * (1 - config.PLATFORM_COMMISSION_PCT)
 
     @property
+    def product_cost(self):
+        """Pieces that leave for good in the normal course: kept + damaged returns."""
+        return self.cogs * (self.kept + self.ret * config.DAMAGED_RETURN_SHARE)
+
+    @property
+    def transit_cost(self):
+        """Pieces lost in transit: forward shipments, plus return and RTO legs."""
+        return self.cogs * self.transit * (1 + self.ret + self.rto)
+
+    @property
+    def shipping_cost(self):
+        fwd_kept = self.kept * self.fwd if config.SELLER_PAYS_FORWARD_ON_KEPT else 0.0
+        return fwd_kept + self.ret * (self.fwd + self.rev) + self.rto * config.RTO_CHARGE
+
+    @property
     def cost_per_order(self):
-        return (self.cogs * (self.kept + self.ret * config.DAMAGED_RETURN_SHARE) + self.packaging + self.fwd
-                + self.ret * self.rev + self.rto * config.RTO_CHARGE)
+        return self.product_cost + self.transit_cost + self.packaging + self.shipping_cost
 
     @property
     def units_per_order(self):
-        """Stock that leaves for good per order (kept + damaged returns)."""
-        return self.kept + self.ret * config.DAMAGED_RETURN_SHARE
+        """Stock that leaves for good per order."""
+        return self.kept + self.ret * config.DAMAGED_RETURN_SHARE + self.transit * (1 + self.ret + self.rto)
 
     def profit(self, p):
         return p * self.net_factor - self.cost_per_order
@@ -177,18 +200,20 @@ class Economics:
     def breakdown(self, p):
         k = self.kept
         lines = [
-            ("Money collected (after returns & RTO)", k * p),
-            (f"GST ({config.GST_RATE:.0%} of price)", -k * p * self.gst_share),
-            ("Product cost (COGS)", -self.cogs * (k + self.ret * config.DAMAGED_RETURN_SHARE)),
-            ("Packaging", -self.packaging),
-            ("Forward shipping", -self.fwd),
-            (f"Return shipping ({self.ret:.0%} returns)", -self.ret * self.rev),
-            (f"RTO charges ({self.rto:.0%} undelivered)", -self.rto * config.RTO_CHARGE),
+            ("Money collected (orders kept)", k * p, "rupee"),
+            (f"GST ({config.GST_RATE:.0%} of price)", -k * p * self.gst_share, "tax"),
+            ("Product cost", -self.product_cost, "tag"),
+            ("Packaging", -self.packaging, "box"),
+            (f"Return shipping, both ways ({self.ret:.0%} returns)", -self.ret * (self.fwd + self.rev), "return"),
+            (f"Lost in transit ({self.transit:.1%} of shipments)", -self.transit_cost, "truck"),
+            (f"RTO ({self.rto:.0%} not delivered) - no charge", -self.rto * config.RTO_CHARGE, "home"),
         ]
+        if config.SELLER_PAYS_FORWARD_ON_KEPT:
+            lines.insert(4, ("Delivery on kept orders", -k * self.fwd, "truck"))
         if config.PLATFORM_COMMISSION_PCT:
-            lines.insert(2, ("Platform commission", -k * p * (1 - self.gst_share) * config.PLATFORM_COMMISSION_PCT))
-        return [{"label": l, "amount": round(v, 1)} for l, v in lines] + \
-               [{"label": "Profit per order", "amount": round(self.profit(p), 1), "total": True}]
+            lines.insert(2, ("Platform commission", -k * p * (1 - self.gst_share) * config.PLATFORM_COMMISSION_PCT, "tax"))
+        return [{"label": l, "amount": round(v, 1), "icon": i} for l, v, i in lines] + \
+               [{"label": "Profit per order", "amount": round(self.profit(p), 1), "icon": "wallet", "total": True}]
 
 
 # ---------------------------------------------------------------- demand scenario
@@ -317,7 +342,8 @@ class PricingAgent:
         summary = m.market_summary(attrs, pool, fair)
         ret, rto, ret_orders = m.return_rates(attrs, pool)
         eco = Economics(cogs=inp["cogs"], ret=ret, rto=rto, packaging=pkg["packaging_cost"],
-                        fwd=pkg["shipping_forward"], rev=pkg["shipping_reverse"])
+                        fwd=pkg["shipping_forward"], rev=pkg["shipping_reverse"],
+                        transit=config.TRANSIT_LOSS[attrs["product_type"]])
 
         # 2. demand
         fit = m.fit_demand(pool, attrs["occasion"])
@@ -422,6 +448,7 @@ class PricingAgent:
             "modes": all_modes,
             "economics": {"breakdown": eco.breakdown(price), "return_rate_pct": round(100 * ret, 1),
                           "rto_rate_pct": round(100 * rto, 1), "return_rate_based_on_orders": ret_orders,
+                          "transit_loss_pct": round(100 * eco.transit, 1),
                           "cost_per_order": round(eco.cost_per_order, 1), "cogs": round(inp["cogs"], 1),
                           "cogs_source": inp["cogs_source"], "kept_share_pct": round(100 * eco.kept, 1)},
             "market": {k: v for k, v in summary.items() if k != "prices"},

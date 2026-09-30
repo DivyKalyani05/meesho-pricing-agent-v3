@@ -119,7 +119,7 @@ class Repricer:
         pkg = features.estimate_package(p["product_type"], p["fabric"], p["package_size"])
         cogs = p["cogs"] or 0.44 * fair
         eco = Economics(cogs=cogs, ret=ret, rto=rto, packaging=pkg["packaging_cost"], fwd=pkg["shipping_forward"],
-                        rev=pkg["shipping_reverse"])
+                        rev=pkg["shipping_reverse"], transit=config.TRANSIT_LOSS[p["product_type"]])
 
         # season & festivals: what the last 28 days looked like vs the next 30
         recent = signals.window_average(m.snapshot - timedelta(days=27), 28, p["fabric"], p["occasion"])
@@ -191,7 +191,7 @@ class Repricer:
             "fwd": fwd, "recent": recent, "fwd90": fwd90, "b_fwd": b_fwd, "top_rival": top_rival,
             "n_rivals": len(rivals), "top_complaint": top_complaint,
             "complaint_share": round(100 * neg[top_complaint] / p["n_reviews"]) if top_complaint else None,
-            "series": series,
+            "series": series, "level": level, "b": b, "crowd_adj": crowd_adj, "hist": hist,
         }
 
     # ------------------------------------------------------------------ optimise one design
@@ -468,12 +468,7 @@ class Repricer:
         if not prods:
             return dict(base, summary=None, groups=[], rivals=self._rivals(seller_id, prods, demo_ids))
 
-        series, inv, recs, names, changed = self._metrics([p["product_id"] for p in prods])
-        ctxs = [self._analyse(p, series.get(p["product_id"], []), inv.get(p["product_id"], 0), today, ctx_seller)
-                for p in prods]
-        for c in ctxs:
-            last = changed.get(c["p"]["product_id"])
-            c["changed_on"] = last if last and date.fromisoformat(last) > m.snapshot - timedelta(days=14) else None
+        ctxs, recs, names = self._contexts(prods, today, ctx_seller)
         groups = defaultdict(list)
         for c in ctxs:
             groups[c["p"]["catalog_id"]].append(c)
@@ -551,6 +546,35 @@ class Repricer:
             "ageing_units": int(tot["old_units"]),
         }
         return dict(base, summary=summary, groups=out_groups, rivals=self._rivals(seller_id, prods, demo_ids))
+
+    def _contexts(self, prods, today, ctx_seller):
+        """Per-listing demand + economics context for a seller's live listings."""
+        m = self.m
+        series, inv, recs, names, changed = self._metrics([p["product_id"] for p in prods])
+        ctxs = [self._analyse(p, series.get(p["product_id"], []), inv.get(p["product_id"], 0), today, ctx_seller)
+                for p in prods]
+        for c in ctxs:
+            last = changed.get(c["p"]["product_id"])
+            c["changed_on"] = last if last and date.fromisoformat(last) > m.snapshot - timedelta(days=14) else None
+            c["design"] = names.get(c["p"]["catalog_id"], c["p"]["title"])
+        return ctxs, recs, names
+
+    def seller_contexts(self, seller_id):
+        """(seller dict, contexts) - used by the sale planner."""
+        m = self.m
+        try:
+            seller_id = int(seller_id)
+        except (TypeError, ValueError):
+            raise InputError("Pick a seller.")
+        if seller_id not in m.sellers:
+            raise InputError("Seller not found.")
+        today = m.snapshot + timedelta(days=1)
+        demo_ids = {s["seller_id"] for s in m.sellers.values() if s["is_demo_seller"]}
+        prods = [p for p in m.products if p["seller_id"] == seller_id and p["status"] == "active"]
+        hist = m.seller_history(seller_id, {k: None for k in ATTRS})
+        ctx_seller = {"ctr_factor": hist["ctr_factor"] if hist else 1.0, "demo_ids": demo_ids}
+        ctxs = self._contexts(prods, today, ctx_seller)[0] if prods else []
+        return m.sellers[seller_id], ctxs
 
     def find_variant(self, product_id, mode="balanced"):
         """(variant, design name, seller name, goal label) for one live listing, or None."""
